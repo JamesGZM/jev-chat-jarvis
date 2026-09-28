@@ -185,6 +185,10 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
         get() = sp.getBoolean(K_ENABLED, true)
         set(v) = sp.edit().putBoolean(K_ENABLED, v).apply()
 
+    fun requestOverlayRestore() {
+        sp.edit().putLong(K_RESTORE_OVERLAY, System.nanoTime()).apply()
+    }
+
     /**
      * Conversation whitelist: titles the assistant is allowed to act on. Empty
      * set means "all conversations". Stored as a plain string set.
@@ -258,6 +262,7 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
 
         /** The one real config file. Anything else is a scratch instance. */
         const val PREFS_MAIN = "jev_assistant"
+        const val K_RESTORE_OVERLAY = "overlay_restore_request"
 
         private const val K_LEGACY_KEY = "openrouter_key"
         private const val K_MIGRATED_V13 = "prefs_migrated_v13"

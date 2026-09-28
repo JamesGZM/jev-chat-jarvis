@@ -243,7 +243,11 @@ class OverlayController(private val ctx: Context) {
         menu.addView(menuItem("截屏识别一次") { root?.removeView(menu); onOcrCapture?.invoke() })
         menu.addView(menuItem("把当前会话存为联系人") { onSaveContact?.invoke(); root?.removeView(menu) })
         menu.addView(menuItem("打开设置") { openSettings(); root?.removeView(menu) })
-        menu.addView(menuItem("隐藏助手（本次）") { hide() })
+        menu.addView(menuItem("隐藏助手（可恢复）") {
+            hide()
+            android.util.Log.i("JEVASSIST", "overlay hidden by user")
+            toast("已隐藏，打开 Jev 首页点「恢复悬浮窗」可重新显示")
+        })
         menu.addView(menuItem("取消") { root?.removeView(menu) })
         root?.addView(menu)
     }

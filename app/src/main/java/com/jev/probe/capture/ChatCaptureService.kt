@@ -63,6 +63,18 @@ open class ChatCaptureService : AccessibilityService() {
     private val wechatTitleCache = WindowTitleCache()
     private var titleOcrBusy = false
     private val preferencesListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == Prefs.K_RESTORE_OVERLAY) {
+            // Let the home Activity move behind the chat and preference callbacks settle.
+            main.postDelayed({
+                if (!destroyed && prefs.enabled) {
+                    leaveConversation()
+                    overlay?.hide()
+                    overlay?.showIdle(null)
+                    maybeCapture()
+                    Log.i(TAG, "overlay restore: showing=${overlay?.isShowing() == true}")
+                }
+            }, 300)
+        }
         if (key == "enabled" || key == "whitelist") {
             main.post {
                 leaveConversation()
@@ -651,15 +663,12 @@ open class ChatCaptureService : AccessibilityService() {
         if (!isCurrent(token)) return null
         val root = rootInActiveWindow ?: return null
         if (targetFor(root) != token.target) return null
-        val input = when (token.target.pkg) {
-            "com.tencent.mobileqq" -> root.findAccessibilityNodeInfosByViewId("com.tencent.mobileqq:id/input").firstOrNull()
-            "com.ss.android.lark" -> resolveFeishuInput(
-                findById = { root.findAccessibilityNodeInfosByViewId(it) },
-                canWrite = { it.refresh() && it.isEditable && it.isVisibleToUser && it.isEnabled && !it.isPassword }
-            )
-            "com.twitter.android" -> findEditable(root)
-            else -> null // Unknown apps support explicit clipboard copy, not unverified writes.
-        }
+        val input = resolveChatInput(
+            pkg = token.target.pkg,
+            findById = { root.findAccessibilityNodeInfosByViewId(it) },
+            findUniqueEditable = { findEditable(root) },
+            canWrite = { it.refresh() && it.isEditable && it.isVisibleToUser && it.isEnabled && !it.isPassword }
+        )
         // Re-read the node after SET_TEXT: the accessibility cache may still
         // contain the previous draft even though the write already succeeded.
         input ?: return null

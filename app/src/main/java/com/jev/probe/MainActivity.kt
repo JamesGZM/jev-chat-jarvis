@@ -92,6 +92,17 @@ class MainActivity : AppCompatActivity() {
 
         // Actions
         container.addView(sectionLabel("其他"))
+        container.addView(actionRow("恢复悬浮窗", "隐藏后重新显示，并重置悬浮球位置") {
+            if (!isA11yEnabled() || !Settings.canDrawOverlays(this)) {
+                Toast.makeText(this, "请先开启无障碍和悬浮窗权限", Toast.LENGTH_SHORT).show()
+            } else {
+                prefs.enabled = true
+                prefs.bubbleX = dp(8)
+                prefs.bubbleY = dp(150)
+                prefs.requestOverlayRestore()
+                moveTaskToBack(true)
+            }
+        })
         container.addView(actionRow("设置", "密钥 · 模型 · 关系 · 透明度 · 会话白名单") {
             startActivity(Intent(this, SettingsActivity::class.java))
         })

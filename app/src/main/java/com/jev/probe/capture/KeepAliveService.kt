@@ -3,11 +3,13 @@ package com.jev.probe.capture
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import com.jev.probe.MainActivity
 
 /**
  * A minimal foreground service whose only job is to keep the app process at
@@ -29,7 +31,10 @@ class KeepAliveService : Service() {
         }
         val notif: Notification = Notification.Builder(this, channelId)
             .setContentTitle("Jev 助手运行中")
-            .setContentText("在聊天旁读消息、给回复建议")
+            .setContentText("点此打开 Jev，可恢复悬浮窗")
+            .setContentIntent(PendingIntent.getActivity(this, 0,
+                Intent(this, MainActivity::class.java),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             .setSmallIcon(android.R.drawable.ic_menu_edit)
             .setOngoing(true)
             .build()
