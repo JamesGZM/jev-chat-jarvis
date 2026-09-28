@@ -29,6 +29,10 @@ interface ChatAppAdapter {
     fun extract(root: AccessibilityNodeInfo, res: Resources): ChatSnapshot?
 }
 
+/** Adapted chat apps, keyed by foreground package name. */
+internal fun createChatAppAdapters(): Map<String, ChatAppAdapter> =
+    listOf(WeChatAdapter(), QQAdapter(), XAdapter(), FeishuAdapter()).associateBy { it.pkg }
+
 /** Shared helpers. */
 private fun looksLikeTimestamp(t: String): Boolean =
     Regex("""\d{1,2}[:：]\d{2}""").containsMatchIn(t) ||
@@ -138,13 +142,13 @@ internal fun findWeChatTitle(
  *  text) is exactly the case OCR fallback exists for. */
 class WeChatAdapter : ChatAppAdapter {
     override val pkg = "com.tencent.mm"
+    private var lastDiagnostics: String? = null
 
     override fun extract(root: AccessibilityNodeInfo, res: Resources): ChatSnapshot? {
         val width = res.displayMetrics.widthPixels
         val bubbles = ArrayList<Triple<Int, Int, String>>() // top, centerX, text
         var firstBubbleTop = Int.MAX_VALUE
         var isChat = false
-
         val stack = ArrayDeque<AccessibilityNodeInfo>()
         stack.addLast(root)
         var guard = 0
@@ -164,6 +168,11 @@ class WeChatAdapter : ChatAppAdapter {
             for (i in node.childCount - 1 downTo 0) node.getChild(i)?.let { stack.addLast(it) }
         }
         val title = findWeChatTitle(root, firstBubbleTop, width, res)
+        val diagnostics = "wechat capture: isChat=$isChat messages=${bubbles.size} hasTitle=${!title.isNullOrBlank()}"
+        if (diagnostics != lastDiagnostics) {
+            android.util.Log.i("JEVASSIST", diagnostics)
+            lastDiagnostics = diagnostics
+        }
         // In a chat but nothing readable → empty snapshot, the OCR fallback cue.
         if (bubbles.isEmpty()) return if (isChat) ChatSnapshot(title, emptyList()) else null
         bubbles.sortBy { it.first }
@@ -194,8 +203,14 @@ class WeChatAdapter : ChatAppAdapter {
  * incoming message can push its center past mid-screen, so we compare which
  * edge of the bubble hugs its avatar column instead of using the center point.
  */
+internal fun qqConversationTitle(id: String?, text: CharSequence?, visible: Boolean): String? {
+    if (!visible || (id != "com.tencent.mobileqq:id/371" && id != "com.tencent.mobileqq:id/3g3")) return null
+    return text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+}
+
 class QQAdapter : ChatAppAdapter {
     override val pkg = "com.tencent.mobileqq"
+    private var lastDiagnostics: String? = null
 
     override fun extract(root: AccessibilityNodeInfo, res: Resources): ChatSnapshot? {
         val width = res.displayMetrics.widthPixels
@@ -219,12 +234,17 @@ class QQAdapter : ChatAppAdapter {
                 if (b.top < firstBubbleTop) firstBubbleTop = b.top
             }
             if (!hasInput && id == INPUT_ID) hasInput = true
-            if (id == TITLE_ID && title == null) text?.let { if (it.isNotBlank()) title = it }
+            if (title == null) title = qqConversationTitle(id, text, node.isVisibleToUser)
             for (i in node.childCount - 1 downTo 0) node.getChild(i)?.let { stack.addLast(it) }
         }
         if (bubbles.isEmpty() && !hasInput) return null
 
         if (title == null) title = findTitleInActionBar(root, firstBubbleTop, width, res)
+        val diagnostics = "qq capture: hasInput=$hasInput messages=${bubbles.size} hasTitle=${!title.isNullOrBlank()}"
+        if (diagnostics != lastDiagnostics) {
+            android.util.Log.i("JEVASSIST", diagnostics)
+            lastDiagnostics = diagnostics
+        }
         if (bubbles.isEmpty()) return ChatSnapshot(title, emptyList())
 
         val avatarEdge = (width * 0.13).toInt()
@@ -241,7 +261,6 @@ class QQAdapter : ChatAppAdapter {
 
     companion object {
         private const val BUBBLE_ID = "com.tencent.mobileqq:id/mjn"
-        private const val TITLE_ID = "com.tencent.mobileqq:id/371"
         private const val INPUT_ID = "com.tencent.mobileqq:id/input"
     }
 }
@@ -325,8 +344,9 @@ class FeishuAdapter : ChatAppAdapter {
         val topBand = (height * 0.14).toInt()      // action bar + tab row
         val bottomBand = (height * 0.84).toInt()   // input box + keyboard
 
-        var isChat = false
+        val structure = FeishuChatStructure()
         var title: String? = null
+        var shellTitle: String? = null
         val items = ArrayList<Triple<Int, Int, String>>() // top, centerX, text
         // Same collection the service re-runs inside the screenshot callback.
         val rects = collectFeishuBubbleRects(root, res)
@@ -338,9 +358,9 @@ class FeishuAdapter : ChatAppAdapter {
             guard++
             val node = stack.removeLast()
             val id = node.viewIdResourceName ?: ""
-            if (id.endsWith(":id/message") || id.endsWith(":id/bubble_content_container") ||
-                id.endsWith(":id/kb_rich_text_content")) isChat = true
+            structure.observe(id)
             if (id.endsWith(":id/group_name")) node.text?.toString()?.let { if (title == null) title = it }
+            if (id == "$pkg:id/title") node.text?.toString()?.let { if (shellTitle == null) shellTitle = it }
 
             val text = node.text?.toString()
             val cls = node.className?.toString()
@@ -352,7 +372,10 @@ class FeishuAdapter : ChatAppAdapter {
             }
             for (i in node.childCount - 1 downTo 0) node.getChild(i)?.let { stack.addLast(it) }
         }
-        if (!isChat) return null
+        if (!structure.isChat) return null
+        // The newer shell's TextViews include action labels and input hints;
+        // without verified message nodes, use OCR rather than treating them as chat.
+        if (structure.usesNewShell) return ChatSnapshot(title ?: shellTitle, emptyList(), rects)
 
         if (items.isEmpty()) return ChatSnapshot(title, emptyList(), rects)
 

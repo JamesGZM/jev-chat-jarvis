@@ -50,6 +50,19 @@ class ConversationSessionTest {
         assertFalse(session.accepts(request))
     }
 
+    @Test fun switchingToWechatAndBackRejectsStaleCallbacks() {
+        val session = ConversationSession()
+        session.observe(chatA)
+        val qqRequest = session.begin()!!
+        session.observe(chatA.copy(pkg = "com.tencent.mm"))
+        assertFalse(session.accepts(qqRequest))
+        val wechatRequest = session.begin()!!
+        assertTrue(session.accepts(wechatRequest))
+        session.observe(chatA)
+        assertFalse(session.accepts(wechatRequest))
+        assertFalse(session.accepts(qqRequest))
+    }
+
     @Test fun differentMessagesInvalidateEvenWhenChatTitlesMatch() {
         val session = ConversationSession()
         session.observe(chatA.copy(messagesSignature = "other:hello"))
