@@ -53,6 +53,8 @@ open class ChatCaptureService : AccessibilityService() {
     }
     private lateinit var prefs: Prefs
     private var overlay: OverlayController? = null
+    private val bubbleVisibility by lazy { BubbleVisibility(packageName) }
+    private val foregroundRetry = Runnable { maybeCapture(retryMissingRoot = false) }
 
     private var lastSignature: String = ""
     private var activePkg: String? = null
@@ -67,9 +69,9 @@ open class ChatCaptureService : AccessibilityService() {
             // Let the home Activity move behind the chat and preference callbacks settle.
             main.postDelayed({
                 if (!destroyed && prefs.enabled) {
+                    bubbleVisibility.restore()
                     leaveConversation()
                     overlay?.hide()
-                    overlay?.showIdle(null)
                     maybeCapture()
                     Log.i(TAG, "overlay restore: showing=${overlay?.isShowing() == true}")
                 }
@@ -78,7 +80,7 @@ open class ChatCaptureService : AccessibilityService() {
         if (key == "enabled" || key == "whitelist") {
             main.post {
                 leaveConversation()
-                overlay?.hide()
+                maybeCapture()
             }
         }
     }
@@ -106,8 +108,8 @@ open class ChatCaptureService : AccessibilityService() {
 
     private fun leaveConversation() {
         wechatTitleCache.invalidate()
-        observeTarget(null)
-        cancelAnalysis()
+        if (session.target != null) observeTarget(null)
+        else if (analyzing || pendingSnapshot != null || currentSnapshot != null) cancelAnalysis()
         currentSnapshot = null
     }
 
@@ -136,7 +138,8 @@ open class ChatCaptureService : AccessibilityService() {
         val live = rootInActiveWindow?.let { targetFor(it) }
         if (live != token.target || !prefs.isAllowed(currentSnapshot?.title ?: live.title)) {
             leaveConversation()
-            overlay?.hide()
+            // A stale result must not hide the idle bubble on the new chat/list.
+            main.post { if (!destroyed) maybeCapture() }
             return false
         }
         return true
@@ -172,6 +175,11 @@ open class ChatCaptureService : AccessibilityService() {
         getSharedPreferences(Prefs.PREFS_MAIN, MODE_PRIVATE)
             .registerOnSharedPreferenceChangeListener(preferencesListener)
         overlay = OverlayController(this)
+        overlay?.onHideForVisit = {
+            bubbleVisibility.hideForVisit(rootInActiveWindow?.packageName?.toString() ?: foregroundPkg)
+            leaveConversation()
+            overlay?.hide()
+        }
         overlay?.onManualAnalyze = {
             if (!prefs.enabled) {
                 overlay?.toast("助手已暂停，请先在设置中开启")
@@ -220,51 +228,52 @@ open class ChatCaptureService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
-        if (!prefs.enabled) { leaveConversation(); overlay?.hide(); return }
-
         val type = event.eventType
-        // Decide "did we leave the chat app" from the REAL active window, not the
-        // event's package. The event package can be an IME (e.g. com.tencent.wetype)
-        // or the status bar while the chat app is still foreground — keying off it
-        // made the bubble flicker (hide → re-show → hide…). rootInActiveWindow stays
-        // on the chat app while the keyboard is up, so this is stable.
-        //
-        // An app with no adapter is NOT a reason to take the bubble away: the only
-        // way into DingTalk / Telegram / anything else is the bubble menu's
-        // "截屏识别一次", and a bubble that is gone cannot be tapped. So we park
-        // the idle bubble there instead — still no automatic capture, no analysis.
-        // The bubble does come off for places where it would only be in the way:
-        // our own settings screens, the launcher, and the system UI.
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            val fg = rootInActiveWindow?.packageName?.toString()
-            if (event.packageName?.toString() == "com.tencent.mm") wechatTitleCache.invalidate()
-            if (fg != null && fg !in adapters) {
-                val target = rootInActiveWindow?.let { targetFor(it) }
-                if (session.target != target) leaveConversation()
-                foregroundPkg = fg
-                val drop = fg == packageName ||
-                    fg.contains("launcher", ignoreCase = true) ||
-                    fg == "com.miui.home" ||
-                    fg == "com.android.systemui"
-                if (drop) overlay?.hide() else overlay?.showIdle(null)
-                return
-            }
-        }
+        // Ignore our own overlay content updates; rebuilding the idle view must
+        // not become a feedback loop of capture events.
+        if (type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+            event.packageName?.toString() == packageName) return
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            event.packageName?.toString() == "com.tencent.mm") wechatTitleCache.invalidate()
 
         when (type) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED,
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
             AccessibilityEvent.TYPE_VIEW_SCROLLED -> maybeCapture()
         }
     }
 
-    private fun maybeCapture() {
-        val root = rootInActiveWindow ?: run { leaveConversation(); overlay?.hide(); return }
-        val pkg = root.packageName?.toString()
-        // Apps with no adapter are never handled automatically (v1.3 revision):
-        // the only way in for them is the bubble menu's "截屏识别一次".
+    private fun maybeCapture(retryMissingRoot: Boolean = true) {
+        if (destroyed) return
+        val root = rootInActiveWindow
+        val pkg = root?.packageName?.toString()
+        when (bubbleVisibility.decide(prefs.enabled, pkg)) {
+            BubbleVisibility.Decision.HIDE -> {
+                main.removeCallbacks(foregroundRetry)
+                leaveConversation()
+                overlay?.hide()
+                if (pkg != null) foregroundPkg = pkg
+                return
+            }
+            BubbleVisibility.Decision.KEEP -> {
+                // Invalidate analysis immediately, but let the window transition
+                // settle before removing the user's entry point.
+                leaveConversation()
+                if (retryMissingRoot) {
+                    main.removeCallbacks(foregroundRetry)
+                    main.postDelayed(foregroundRetry, 300)
+                } else overlay?.hide()
+                return
+            }
+            BubbleVisibility.Decision.SHOW -> main.removeCallbacks(foregroundRetry)
+        }
+        root ?: return
+        foregroundPkg = pkg
         val adapter = adapters[pkg] ?: run {
-            if (session.target != null && session.target != targetFor(root)) leaveConversation()
+            val target = targetFor(root)
+            if (session.target != target) leaveConversation()
+            if (session.target == null || overlay?.isShowing() != true) overlay?.showIdle(null)
             return
         }
         // Outside a chat window (the conversation list, a profile, settings…) the
@@ -285,7 +294,7 @@ open class ChatCaptureService : AccessibilityService() {
         observeTarget(target)
         // Use only this window's title; never inherit another conversation's title.
         val snapshot = rawSnapshot.copy(title = target.title)
-        if (!prefs.isAllowed(snapshot.title)) { leaveConversation(); overlay?.hide(); return }
+        if (!prefs.isAllowed(snapshot.title)) { leaveConversation(); overlay?.showIdle(null); return }
         // In a chat window but the tree holds no text (Feishu draws its bodies,
         // WeChat hides them when the disguise fails) → screenshot + OCR, subject
         // to ScreenCapture's own >=1s throttle and failure backoff.
@@ -632,7 +641,7 @@ open class ChatCaptureService : AccessibilityService() {
             if (manual) overlay?.showError("这一屏没认出文字")
             return
         }
-        if (!prefs.isAllowed(snapshot.title)) { leaveConversation(); overlay?.hide(); return }
+        if (!prefs.isAllowed(snapshot.title)) { leaveConversation(); overlay?.showIdle(null); return }
 
         if (pkg.isNotEmpty() && pkg != activePkg) { activePkg = pkg; lastSignature = "" }
         currentSnapshot = snapshot
@@ -750,6 +759,7 @@ open class ChatCaptureService : AccessibilityService() {
         super.onDestroy()
         // Tear the overlay down and cut its callback so a stale button tap can
         // never call back into this dead instance.
+        overlay?.onHideForVisit = null
         overlay?.onManualAnalyze = null
         overlay?.onSaveContact = null
         overlay?.onOcrCapture = null

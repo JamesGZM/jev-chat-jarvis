@@ -48,6 +48,8 @@ class OverlayController(private val ctx: Context) {
     private var lp: WindowManager.LayoutParams? = null
 
     var onManualAnalyze: (() -> Unit)? = null
+    var onHideForVisit: (() -> Unit)? = null
+    private var idleShowing = false
 
     /** Bubble menu → file the open conversation as a knowledge-base contact. */
     var onSaveContact: (() -> Unit)? = null
@@ -106,7 +108,8 @@ class OverlayController(private val ctx: Context) {
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             x = if (prefs.bubbleX in 0..(screenW - dp(52))) prefs.bubbleX else dp(8)
-            y = if (prefs.bubbleY >= 0) prefs.bubbleY else dp(150)
+            y = (if (prefs.bubbleY >= 0) prefs.bubbleY else dp(150))
+                .coerceIn(dp(24), maxOf(dp(24), screenH - dp(120)))
         }
         lp = params
 
@@ -244,9 +247,9 @@ class OverlayController(private val ctx: Context) {
         menu.addView(menuItem("把当前会话存为联系人") { onSaveContact?.invoke(); root?.removeView(menu) })
         menu.addView(menuItem("打开设置") { openSettings(); root?.removeView(menu) })
         menu.addView(menuItem("隐藏助手（可恢复）") {
-            hide()
+            onHideForVisit?.invoke() ?: hide()
             android.util.Log.i("JEVASSIST", "overlay hidden by user")
-            toast("已隐藏，打开 Jev 首页点「恢复悬浮窗」可重新显示")
+            toast("当前应用内暂时隐藏，离开后再进入或到 Jev 首页恢复")
         })
         menu.addView(menuItem("取消") { root?.removeView(menu) })
         root?.addView(menu)
@@ -296,8 +299,9 @@ class OverlayController(private val ctx: Context) {
         // contentBox with zero children while lastJudgment still points at a
         // stale conversation) — either way an empty panel must never stay
         // literally blank.
-        if (lastJudgment == null || contentBox?.childCount == 0) {
+        if ((!idleShowing && lastJudgment == null) || contentBox?.childCount == 0) {
             setContent(listOf(bigButton("分析当前对话") { onManualAnalyze?.invoke() }))
+            idleShowing = true
         }
     }
 
@@ -310,6 +314,7 @@ class OverlayController(private val ctx: Context) {
      * could fill the wrong chat's input box.
      */
     fun resetForNewConversation() {
+        idleShowing = false
         lastJudgment = null
         lastFill = null
         noteText = null
@@ -392,6 +397,7 @@ class OverlayController(private val ctx: Context) {
     fun toast(msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
 
     fun hide() {
+        idleShowing = false
         val r = root ?: return
         runCatching { wm.removeView(r) }
         root = null; bubble = null; panel = null; contentBox = null; dangerDot = null; expanded = false
@@ -400,6 +406,7 @@ class OverlayController(private val ctx: Context) {
     // --------------------------------------------------------------- rendering
 
     private fun setContent(views: List<View>) {
+        idleShowing = false
         val c = contentBox ?: return
         c.removeAllViews(); views.forEach { c.addView(it) }
     }
