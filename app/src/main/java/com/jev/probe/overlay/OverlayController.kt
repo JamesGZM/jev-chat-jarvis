@@ -67,12 +67,13 @@ class OverlayController(private val ctx: Context) {
     /** Whether the overlay window is currently on screen. */
     fun isShowing(): Boolean = root != null
 
-    private var lastJudgment: Analysis? = null
+    private val resultState = AnalysisPresentationState()
+    private val lastJudgment: Analysis? get() = resultState.analysis
     private var lastFill: ((String) -> Unit)? = null
 
     /** Set when [showReplies] was handed a draftAndRank failure, so the panel
      *  can say so instead of silently showing "（未生成候选回复）". */
-    private var replyError: String? = null
+    private val replyError: String? get() = resultState.replyError
 
     private fun dp(v: Int) = TypedValue.applyDimension(
         TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), ctx.resources.displayMetrics).roundToInt()
@@ -315,10 +316,9 @@ class OverlayController(private val ctx: Context) {
      */
     fun resetForNewConversation() {
         idleShowing = false
-        lastJudgment = null
+        resultState.reset()
         lastFill = null
         noteText = null
-        replyError = null
         contentBox?.removeAllViews()
     }
 
@@ -335,7 +335,8 @@ class OverlayController(private val ctx: Context) {
     fun showLoading() {
         ensureRoot(); bubble?.alpha = 1f
         ctxNotes = 0; ctxHistory = 0   // counts for the round that is starting
-        replyError = null              // this round has not failed (yet)
+        resultState.reset()
+        lastFill = null
         setContent(listOf(hint("分析中…")))
         if (!expanded) toggle()
     }
@@ -382,16 +383,14 @@ class OverlayController(private val ctx: Context) {
     }
 
     fun showJudgment(a: Analysis) {
-        lastJudgment = a
-        render(a, generating = true)
+        resultState.receiveJudgment(a)
+        resultState.analysis?.let { render(it, generating = resultState.generating) }
     }
 
     fun showReplies(ranked: List<RankedReply>, error: String? = null, onFill: (String) -> Unit) {
         lastFill = onFill
-        replyError = error
-        val a = lastJudgment?.copy(rankedReplies = ranked) ?: return
-        lastJudgment = a
-        render(a, generating = false)
+        resultState.receiveReplies(ranked, error)
+        resultState.analysis?.let { render(it, generating = resultState.generating) }
     }
 
     fun toast(msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()

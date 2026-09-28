@@ -50,6 +50,10 @@ data class ChatContext(
     val history: List<LogEntry>,
     val notes: List<Note>
 ) {
+    /** Contact-specific relationship overrides the global fallback on every route. */
+    fun effectiveRelationship(defaultRelationship: String): String =
+        contact?.relationship?.trim()?.takeIf { it.isNotEmpty() } ?: defaultRelationship
+
 
     /** True when there is nothing extra to inject (then no field is sent at all). */
     fun isEmpty(): Boolean = history.isEmpty() && notes.isEmpty() &&

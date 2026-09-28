@@ -392,7 +392,9 @@ open class ChatCaptureService : AccessibilityService() {
                     }
                 }
                 submitAnalysis {
+                    val started = android.os.SystemClock.elapsedRealtime()
                     val judgment = client.judge(snapshot, rel, ctx)
+                    Log.i(TAG, "analysis judgment completed: ok=${judgment.error == null} elapsedMs=${android.os.SystemClock.elapsedRealtime() - started}")
                     main.post {
                         if (isCurrent(token)) {
                             if (judgment.error != null) overlay?.showError(judgment.error)
@@ -402,11 +404,13 @@ open class ChatCaptureService : AccessibilityService() {
                     }
                 }
                 submitAnalysis {
+                    val started = android.os.SystemClock.elapsedRealtime()
                     var replyError: String? = null
                     val ranked = try { client.draftAndRank(snapshot, rel, ctx) } catch (e: Exception) {
                         replyError = e.message ?: e.javaClass.simpleName
                         emptyList()
                     }
+                    Log.i(TAG, "analysis replies completed: ok=${replyError == null} count=${ranked.size} elapsedMs=${android.os.SystemClock.elapsedRealtime() - started}")
                     main.post {
                         if (isCurrent(token)) {
                             overlay?.showReplies(ranked, replyError) { text -> fillInput(token, text) }
