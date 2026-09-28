@@ -55,6 +55,8 @@ class JudgeClient(private val prefs: Prefs) {
         candidates: List<String>,
         ctx: ChatContext? = null
     ): List<RankedReply> {
+        if (candidates.isEmpty()) return emptyList()
+        if (candidates.size == 1) return listOf(RankedReply(candidates.single(), 1.0))
         val questions = JSONObject().put("best_reply",
             JevQuestions.rankQuestion(candidates).getJSONObject("best_reply"))
         val answers = postDecisions(snapshot, relationship, ctx, questions)

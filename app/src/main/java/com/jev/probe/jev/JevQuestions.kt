@@ -202,17 +202,24 @@ object JevQuestions {
         return state
     }
 
-    /** The best_reply ranking question over exactly 3 candidates (Chinese text kept). */
+    /** The best_reply ranking question for multiple candidates (Chinese text kept). */
     fun rankQuestion(candidates: List<String>): JSONObject {
-        require(candidates.size == 3) { "rankQuestion expects exactly 3 candidates" }
+        require(candidates.size in 2..3) { "rankQuestion expects 2 or 3 candidates" }
         val keys = listOf("reply_a", "reply_b", "reply_c")
         val criteria = JSONObject()
-        keys.forEachIndexed { i, k -> criteria.put(k, candidates[i]) }
+        candidates.forEachIndexed { i, text -> criteria.put(keys[i], text) }
         val q = JSONObject().apply {
             put("type", "choice")
             put("instructions",
                 "Which candidate reply is the most appropriate next message, " +
                     "given the conversation and the other person's true need? " +
+                    "Every candidate must be spoken by me to other, never by other to me. " +
+                    "If latest_from is me, evaluate it as my follow-up while awaiting their reply. " +
+                    "Strongly penalize answering my own message as if the other person had said it, " +
+                    "reversing speaker identities, or inventing facts or arrangements. " +
+                    "Preserve the speakers' original wording and intent, including puns and unusual names. " +
+                    "Penalize unsolicited corrections or invented typo/keyboard explanations unless me " +
+                    "explicitly acknowledged a typo or requested correction in the conversation. " +
                     "Prefer a reply that matches the best action type. " +
                     "Penalize dismissive, over-promising, or off-topic replies. " +
                     "If the facts are not yet confirmed, prefer the candidate that looks them up " +

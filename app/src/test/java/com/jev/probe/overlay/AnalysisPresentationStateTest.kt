@@ -2,10 +2,37 @@ package com.jev.probe.overlay
 
 import com.jev.probe.core.Analysis
 import com.jev.probe.core.RankedReply
+import com.jev.probe.core.ReplyAdvice
 import org.junit.Assert.*
 import org.junit.Test
 
 class AnalysisPresentationStateTest {
+    @Test fun waitResultStopsLoadingInEitherCompletionOrder() {
+        for (repliesFirst in listOf(true, false)) {
+            val state = AnalysisPresentationState()
+            if (!repliesFirst) state.receiveJudgment(judgment)
+            state.receiveReplies(emptyList(), null, ReplyAdvice.WAIT)
+            if (repliesFirst) state.receiveJudgment(judgment)
+            assertFalse(state.generating)
+            assertNull(state.replyError)
+            assertEquals(ReplyAdvice.WAIT, state.analysis!!.replyAdvice)
+            assertTrue(state.analysis!!.rankedReplies.isEmpty())
+        }
+    }
+
+    @Test fun newAnalysisAndFailuresCannotReuseWaitAdvice() {
+        val state = AnalysisPresentationState()
+        state.receiveJudgment(judgment)
+        state.receiveReplies(emptyList(), null, ReplyAdvice.WAIT)
+        state.reset()
+        state.receiveJudgment(judgment)
+        assertTrue(state.generating)
+        assertNull(state.analysis!!.replyAdvice)
+        state.receiveReplies(emptyList(), "timeout", ReplyAdvice.WAIT)
+        assertNull(state.analysis!!.replyAdvice)
+        assertEquals("timeout", state.replyError)
+    }
+
     private val judgment = Analysis(null, null, null, null, null, null, null, emptyList(), 10)
     private val replies = listOf(RankedReply("Example reply", 0.8))
 

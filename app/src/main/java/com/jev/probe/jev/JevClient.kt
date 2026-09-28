@@ -3,7 +3,7 @@ package com.jev.probe.jev
 import com.jev.probe.core.Analysis
 import com.jev.probe.core.ChatSnapshot
 import com.jev.probe.core.Prefs
-import com.jev.probe.core.RankedReply
+import com.jev.probe.core.ReplySuggestion
 import com.jev.probe.core.kb.ChatContext
 
 /**
@@ -20,21 +20,22 @@ class JevClient(prefs: Prefs) {
     fun judge(snapshot: ChatSnapshot, relationship: String, ctx: ChatContext? = null): Analysis =
         judgeClient.judge(snapshot, relationship, ctx)
 
-    /** Draft 3 candidates on the reply route, then rank them on the judge route. */
+    /** Decide whether to reply; rank only when there are multiple candidates. */
     fun draftAndRank(
         snapshot: ChatSnapshot,
         relationship: String,
         ctx: ChatContext? = null
-    ): List<RankedReply> {
-        val candidates = replyClient.draft(snapshot, relationship, ctx)
-        return judgeClient.rank(snapshot, relationship, candidates, ctx)
+    ): ReplySuggestion {
+        return replyClient.draft(snapshot, relationship, ctx).rankWith { candidates ->
+            judgeClient.rank(snapshot, relationship, candidates, ctx)
+        }
     }
 
     /** Judge + replies, sequential. Used by the settings connectivity test. */
     fun analyze(snapshot: ChatSnapshot, relationship: String, ctx: ChatContext? = null): Analysis {
         val a = judge(snapshot, relationship, ctx)
         if (a.error != null) return a
-        val ranked = try { draftAndRank(snapshot, relationship, ctx) } catch (e: Exception) { emptyList() }
-        return a.copy(rankedReplies = ranked)
+        val result = try { draftAndRank(snapshot, relationship, ctx) } catch (e: Exception) { null }
+        return a.copy(rankedReplies = result?.replies.orEmpty(), replyAdvice = result?.advice)
     }
 }

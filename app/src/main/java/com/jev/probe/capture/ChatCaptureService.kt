@@ -406,14 +406,15 @@ open class ChatCaptureService : AccessibilityService() {
                 submitAnalysis {
                     val started = android.os.SystemClock.elapsedRealtime()
                     var replyError: String? = null
-                    val ranked = try { client.draftAndRank(snapshot, rel, ctx) } catch (e: Exception) {
+                    val result = try { client.draftAndRank(snapshot, rel, ctx) } catch (e: Exception) {
                         replyError = e.message ?: e.javaClass.simpleName
-                        emptyList()
+                        null
                     }
-                    Log.i(TAG, "analysis replies completed: ok=${replyError == null} count=${ranked.size} elapsedMs=${android.os.SystemClock.elapsedRealtime() - started}")
+                    val ranked = result?.replies.orEmpty()
+                    Log.i(TAG, "analysis replies completed: ok=${replyError == null} action=${result?.advice} count=${ranked.size} elapsedMs=${android.os.SystemClock.elapsedRealtime() - started}")
                     main.post {
                         if (isCurrent(token)) {
-                            overlay?.showReplies(ranked, replyError) { text -> fillInput(token, text) }
+                            overlay?.showReplies(ranked, replyError, result?.advice) { text -> fillInput(token, text) }
                             completed()
                         }
                     }

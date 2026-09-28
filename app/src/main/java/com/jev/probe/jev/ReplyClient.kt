@@ -2,35 +2,31 @@ package com.jev.probe.jev
 
 import com.jev.probe.core.ChatSnapshot
 import com.jev.probe.core.Prefs
+import com.jev.probe.core.ReplyAdvice
 import com.jev.probe.core.kb.ChatContext
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
  * The generative route: any OpenAI-compatible `/chat/completions` endpoint.
- * Drafts the 3 candidate replies, and (D stage) summarizes text. Reads
+ * Decides whether to reply and drafts up to 3 candidates; also summarizes text. Reads
  * replyBaseUrl / replyKey / replyModel from [Prefs].
  */
 class ReplyClient(private val prefs: Prefs) {
 
     /**
-     * Exactly 3 varied candidate replies in Chinese.
+     * Decide whether a reply is useful before drafting candidates in Chinese.
      *
      * @param ctx D-stage knowledge context. When present its background and
      *        history are prepended to the prompt with an instruction to stay
      *        consistent with them and invent nothing beyond them.
      */
-    fun draft(snapshot: ChatSnapshot, relationship: String, ctx: ChatContext? = null): List<String> {
+    fun draft(snapshot: ChatSnapshot, relationship: String, ctx: ChatContext? = null): ReplyDraft {
+        if (snapshot.messages.isEmpty() || snapshot.messages.any { it.side !in setOf("me", "other") })
+            return ReplyDraft(ReplyAdvice.INSUFFICIENT_CONTEXT, emptyList())
         val effectiveRelationship = ctx?.effectiveRelationship(relationship) ?: relationship
-        val convo = snapshot.messages.takeLast(10).joinToString("\n") {
-            (if (it.side == "me") "我" else "对方") + "：" + it.text
-        }
-        val sys = "你是中文即时通讯回复助手。只输出一个 JSON 数组，含且仅含 3 条候选回复文本，" +
-            "三条策略要有区别（例如：一条稳妥承接、一条给具体行动或承诺、一条简短低姿态）。" +
-            "每条不超过 40 字，口语、自然、像真人在聊天软件里发消息。不要解释，不要加引号以外的内容，直接输出 JSON 数组。"
-        val user = knowledgeBlock(effectiveRelationship, ctx) +
-            "关系：$effectiveRelationship\n\n最近对话：\n$convo\n\n请给出 3 条候选回复。"
-        return parseThree(chat(sys, user, temperature = 0.8))
+        val user = ReplyPrompt.user(snapshot, effectiveRelationship, knowledgeBlock(effectiveRelationship, ctx))
+        return ReplyDraftParser.parse(chat(ReplyPrompt.system, user, temperature = 0.8))
     }
 
     /** The background + history preamble; empty string when there is no context. */
@@ -84,24 +80,4 @@ class ReplyClient(private val prefs: Prefs) {
             ?.optJSONObject("message")?.optString("content") ?: ""
     }
 
-    private fun parseThree(content: String): List<String> {
-        val start = content.indexOf('[')
-        val end = content.lastIndexOf(']')
-        if (start >= 0 && end > start) {
-            try {
-                val arr = JSONArray(content.substring(start, end + 1))
-                val out = ArrayList<String>()
-                for (i in 0 until arr.length()) out.add(arr.getString(i).trim())
-                if (out.size >= 3) return out.take(3)
-                while (out.size < 3) out.add("（稍等，我看下）")
-                return out
-            } catch (_: Exception) { }
-        }
-        // Fallback: split lines.
-        val lines = content.split("\n").map { it.trim().trimStart('-', '*', '1', '2', '3', '.', ' ', '"') }
-            .filter { it.isNotBlank() }
-        val out = lines.take(3).toMutableList()
-        while (out.size < 3) out.add("（稍等，我看下）")
-        return out
-    }
 }

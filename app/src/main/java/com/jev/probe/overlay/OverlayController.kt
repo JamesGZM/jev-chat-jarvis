@@ -23,6 +23,7 @@ import com.jev.probe.core.Analysis
 import com.jev.probe.core.ChatSnapshot
 import com.jev.probe.core.Prefs
 import com.jev.probe.core.RankedReply
+import com.jev.probe.core.ReplyAdvice
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -387,9 +388,9 @@ class OverlayController(private val ctx: Context) {
         resultState.analysis?.let { render(it, generating = resultState.generating) }
     }
 
-    fun showReplies(ranked: List<RankedReply>, error: String? = null, onFill: (String) -> Unit) {
+    fun showReplies(ranked: List<RankedReply>, error: String? = null, advice: ReplyAdvice? = null, onFill: (String) -> Unit) {
         lastFill = onFill
-        resultState.receiveReplies(ranked, error)
+        resultState.receiveReplies(ranked, error, advice)
         resultState.analysis?.let { render(it, generating = resultState.generating) }
     }
 
@@ -443,16 +444,17 @@ class OverlayController(private val ctx: Context) {
         a.tensionResolved?.let { if (it >= 0.7) views.add(line("✓ 紧张已缓解", "#16A34A", 12f)) }
 
         views.add(divider())
-        views.add(line("候选回复（Jev 排序）", "#9CA3AF", 12f))
+        views.add(line(if (a.rankedReplies.size > 1) "候选回复（Jev 排序）" else "回复建议", "#9CA3AF", 12f))
         if (generating) {
             views.add(hint("生成中…"))
         } else {
             val fill = lastFill ?: {}
             a.rankedReplies.forEachIndexed { i, r ->
-                views.add(replyCard(i + 1, r.text, (r.prob * 100).roundToInt(), fill))
+                views.add(replyCard(i + 1, r.text, if (a.rankedReplies.size > 1) (r.prob * 100).roundToInt() else null, fill))
             }
             if (a.rankedReplies.isEmpty()) {
-                val msg = replyError?.let { "回复接口出错：$it" } ?: "（未生成候选回复）"
+                val msg = replyError?.let { "回复接口出错：$it" }
+                    ?: a.replyAdvice?.message ?: "（未生成候选回复）"
                 views.add(hint(msg))
             }
         }
@@ -481,7 +483,7 @@ class OverlayController(private val ctx: Context) {
         return row
     }
 
-    private fun replyCard(rank: Int, text: String, pct: Int, onFill: (String) -> Unit): View {
+    private fun replyCard(rank: Int, text: String, pct: Int?, onFill: (String) -> Unit): View {
         val top = rank == 1
         val cardBg = if (top) Color.parseColor("#EAF1FF") else Color.parseColor("#F3F4F6")
         val c = LinearLayout(ctx).apply {
@@ -493,7 +495,7 @@ class OverlayController(private val ctx: Context) {
             ).apply { topMargin = dp(6) }
         }
         c.addView(TextView(ctx).apply {
-            this.text = "#$rank · ${pct}%"; setTextColor(Color.parseColor("#3A7AFE")); textSize = 11f
+            this.text = if (pct == null) "#$rank" else "#$rank · ${pct}%"; setTextColor(Color.parseColor("#3A7AFE")); textSize = 11f
             setTypeface(typeface, Typeface.BOLD)
         })
         c.addView(TextView(ctx).apply {
