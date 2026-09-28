@@ -310,7 +310,18 @@ class SettingsActivity : AppCompatActivity() {
         // =================== 分析 ===================
         root.addView(section("分析"))
         val card2 = card()
-        card2.addView(label("关系描述（给 Jev 判断用）"))
+        card2.addView(label("我的通用人设（可选）"))
+        val personaEdit = edit(prefs.selfPersona, "例如：我是 Android 开发，性格随和，表达直接，遇事认真但不说教").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE; minLines = 2
+        }
+        card2.addView(personaEdit)
+        card2.addView(label("通用回复偏好（可选）"))
+        val styleEdit = edit(prefs.replyStyle, "例如：简短直接，工作沟通先说结论；不随意承诺期限").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE; minLines = 2
+        }
+        card2.addView(styleEdit)
+        card2.addView(text("用于分析和候选回复。联系人中的人设和回复偏好分别覆盖对应默认值，留空则沿用。分析时会随上下文发送给已配置的模型服务。", 11f, sub))
+        card2.addView(label("默认关系（联系人未填写关系时使用）"))
         val relEdit = edit(prefs.relationship, Prefs.DEFAULT_REL)
         card2.addView(relEdit)
         card2.addView(label("会话白名单（每行一个关键词，空=所有会话）"))
@@ -432,6 +443,8 @@ class SettingsActivity : AppCompatActivity() {
             prefs.visionModel = visionModelEdit.text.toString().trim().ifBlank { Prefs.DEFAULT_VISION_MODEL }
 
             prefs.relationship = relEdit.text.toString()   // blank stays blank, on purpose
+            prefs.selfPersona = personaEdit.text.toString()
+            prefs.replyStyle = styleEdit.text.toString()
             prefs.whitelist = wlEdit.text.toString().split("\n")
                 .map { it.trim() }.filter { it.isNotEmpty() }.toSet()
             prefs.autoAnalyze = (autoRow.tag as? Boolean) ?: true

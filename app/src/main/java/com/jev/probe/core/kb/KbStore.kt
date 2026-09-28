@@ -320,16 +320,7 @@ class KbStore private constructor(context: Context) {
         loaded.arr?.let { arr ->
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
-                list.add(Contact(
-                    id = o.optString("id").ifBlank { newId() },
-                    name = o.optString("name"),
-                    aliases = strList(o.optJSONArray("aliases")),
-                    apps = strList(o.optJSONArray("apps")),
-                    relationship = o.optString("relationship"),
-                    notes = o.optString("notes"),
-                    autoSummary = o.optString("autoSummary"),
-                    updatedAt = o.optLong("updatedAt", 0L)
-                ))
+                list.add(ContactJson.read(o, newId()))
             }
         }
         if (loaded.trustworthy) contactsCache = list
@@ -373,15 +364,7 @@ class KbStore private constructor(context: Context) {
     private fun contactsJson(list: List<Contact>): String {
         val arr = JSONArray()
         list.forEach { c ->
-            arr.put(JSONObject()
-                .put("id", c.id)
-                .put("name", c.name)
-                .put("aliases", JSONArray(c.aliases))
-                .put("apps", JSONArray(c.apps))
-                .put("relationship", c.relationship)
-                .put("notes", c.notes)
-                .put("autoSummary", c.autoSummary)
-                .put("updatedAt", c.updatedAt))
+            arr.put(ContactJson.write(c))
         }
         return arr.toString()
     }

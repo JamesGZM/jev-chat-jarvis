@@ -2,6 +2,7 @@ package com.jev.probe.core
 
 import android.content.Context
 import android.util.Log
+import com.jev.probe.core.kb.ChatContext
 
 /**
  * App-private config store. Holds the three API routes (judge / reply / vision),
@@ -174,6 +175,18 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
         set(v) = sp.edit().putBoolean(K_OCR_AUTO, v).apply()
 
     // ------------------------------------------------------------- existing
+
+    var selfPersona: String
+        get() = sp.getString("self_persona", "") ?: ""
+        set(v) = sp.edit().putString("self_persona", v.trim()).apply()
+
+    var replyStyle: String
+        get() = sp.getString("reply_style", "") ?: ""
+        set(v) = sp.edit().putString("reply_style", v.trim()).apply()
+
+    fun personalize(context: ChatContext?): ChatContext =
+        (context ?: ChatContext(null, emptyList(), emptyList()))
+            .copy(selfPersona = selfPersona, replyStyle = replyStyle)
 
     /** Free-text describing who the other person is; goes into Jev's state. */
     var relationship: String

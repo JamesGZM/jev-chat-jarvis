@@ -67,7 +67,7 @@ class KnowledgeActivity : AppCompatActivity() {
     private fun render() {
         container.removeAllViews()
         container.addView(text("知识库与联系人", 24f, ink, bold = true))
-        container.addView(text("只存在本机，不上传。分析时按会话标题匹配联系人、按关键词命中笔记。",
+        container.addView(text("资料保存在本机；分析时匹配的资料会作为上下文发送给已配置的模型服务。",
             12f, sub).apply { setPadding(0, dp(6), 0, dp(4)) })
         container.addView(tabs())
         if (tab == 0) renderNotes() else renderContacts()
@@ -247,6 +247,9 @@ class KnowledgeActivity : AppCompatActivity() {
             c.addView(text("备注：" + c0.notes.replace("\n", " ").take(40), 12f, sub)
                 .apply { setPadding(0, dp(3), 0, 0) })
 
+        if (c0.replyStyle.isNotBlank()) c.addView(text("回复偏好：" + c0.replyStyle.replace("\n", " ").take(40), 12f, sub))
+        if (c0.myPersona.isNotBlank()) c.addView(text("我的人设：" + c0.myPersona.replace("\n", " ").take(40), 12f, sub))
+
         val logN = store.logSize(c0.id)
         val clear = TextView(this).apply {
             text = "清空此人历史（$logN 条）"
@@ -277,15 +280,29 @@ class KnowledgeActivity : AppCompatActivity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             minLines = 3; gravity = Gravity.TOP
         }
-        val relEdit = edit(existing?.relationship ?: "", "例如：同事，带我做项目的组长")
-        val notesEdit = edit(existing?.notes ?: "", "关于这个人要记住的事").apply {
+        val relEdit = edit(existing?.relationship ?: "", "例如：对方是我的直属领导，负责项目排期，关注进度与风险").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 2; gravity = Gravity.TOP
+        }
+        val styleEdit = edit(existing?.replyStyle ?: "", "例如：和他沟通先说结论，再列进度和风险；简短、不随意承诺").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 2; gravity = Gravity.TOP
+        }
+        val myPersonaEdit = edit(existing?.myPersona ?: "", "例如：和这位朋友聊天时，我爱开玩笑、说话随意，但不挖苦人").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 3; gravity = Gravity.TOP
+        }
+        val notesEdit = edit(existing?.notes ?: "", "额外信息，例如：周三下午不方便接电话；上次约定周五同步进度").apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             minLines = 3; gravity = Gravity.TOP
         }
         box.addView(label("名字")); box.addView(nameEdit)
         box.addView(label("别名（每行一个）")); box.addView(aliasEdit)
         box.addView(label("关系")); box.addView(relEdit)
-        box.addView(label("备注")); box.addView(notesEdit)
+        box.addView(label("我的人设（仅此联系人，可选）")); box.addView(myPersonaEdit)
+        box.addView(label("回复偏好（仅此联系人，可选）")); box.addView(styleEdit)
+        box.addView(text("关系、我的人设、回复偏好分别覆盖设置中的对应默认值，留空则沿用；备注是额外信息。", 11f, sub))
+        box.addView(label("额外备注（可选）")); box.addView(notesEdit)
 
         AlertDialog.Builder(this)
             .setTitle(if (existing == null) "新建联系人" else "编辑联系人")
@@ -300,6 +317,8 @@ class KnowledgeActivity : AppCompatActivity() {
                         .map { it.trim() }.filter { it.isNotEmpty() },
                     apps = existing?.apps ?: emptyList(),
                     relationship = relEdit.text.toString().trim(),
+                    replyStyle = styleEdit.text.toString().trim(),
+                    myPersona = myPersonaEdit.text.toString().trim(),
                     notes = notesEdit.text.toString().trim(),
                     autoSummary = existing?.autoSummary ?: ""
                 ))

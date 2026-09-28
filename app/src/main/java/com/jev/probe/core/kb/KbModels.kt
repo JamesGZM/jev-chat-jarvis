@@ -35,7 +35,9 @@ data class Contact(
     val notes: String = "",
     /** Reserved for the (deferred) auto-summary; never written in v1.3. */
     val autoSummary: String = "",
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val replyStyle: String = "",
+    val myPersona: String = ""
 )
 
 /** One remembered chat line. side is "me" / "other", matching [com.jev.probe.core.Msg]. */
@@ -48,7 +50,9 @@ data class LogEntry(val side: String, val text: String, val ts: Long, val app: S
 data class ChatContext(
     val contact: Contact?,
     val history: List<LogEntry>,
-    val notes: List<Note>
+    val notes: List<Note>,
+    val selfPersona: String = "",
+    val replyStyle: String = ""
 ) {
     /** Contact-specific relationship overrides the global fallback on every route. */
     fun effectiveRelationship(defaultRelationship: String): String =
@@ -56,23 +60,26 @@ data class ChatContext(
 
 
     /** True when there is nothing extra to inject (then no field is sent at all). */
-    fun isEmpty(): Boolean = history.isEmpty() && notes.isEmpty() &&
+    fun isEmpty(): Boolean = history.isEmpty() && notes.isEmpty() && selfPersona.isBlank() && replyStyle.isBlank() &&
         (contact == null || (contact.relationship.isBlank() &&
-            contact.notes.isBlank() && contact.autoSummary.isBlank()))
+            contact.notes.isBlank() && contact.autoSummary.isBlank() && contact.replyStyle.isBlank() && contact.myPersona.isBlank()))
 
-    /**
-     * The `background` string injected into Jev's state and the reply prompt:
-     * relationship + contact notes + auto-summary + each matched note as
-     * "title: content". Blank when there is nothing to say — callers must then
-     * omit the field entirely rather than send an empty one.
-     *
-     * @param defaultRelationship unused when the contact carries no relationship
-     *        of its own — that global default already goes out separately as
-     *        `chat.relationship`, so repeating it here would just duplicate it.
-     *        A contact with no relationship set simply omits the "关系：" line.
-     */
+    /** Profile context shared by all model routes, including endpoints without a background field. */
+    fun personaBackground(): String {
+        val sb = StringBuilder()
+        val myPersona = contact?.myPersona?.trim()?.takeIf { it.isNotEmpty() } ?: selfPersona.trim()
+        val effectiveStyle = contact?.replyStyle?.trim()?.takeIf { it.isNotEmpty() } ?: replyStyle.trim()
+        if (myPersona.isNotBlank() || effectiveStyle.isNotBlank()) {
+            sb.append("人设用于理解背景和调整表达；当前对话的明确事实优先，不据此编造经历、位置、承诺或情绪，不改变 me/other 身份。\n")
+            if (myPersona.isNotBlank()) sb.append("我的人设（me）：").append(myPersona).append('\n')
+            if (effectiveStyle.isNotBlank()) sb.append("我的回复偏好：").append(effectiveStyle).append('\n')
+        }
+        return sb.toString().trim()
+    }
+
     fun background(defaultRelationship: String): String {
         val sb = StringBuilder()
+        personaBackground().takeIf { it.isNotEmpty() }?.let { sb.append(it).append('\n') }
         contact?.let { c ->
             val rel = c.relationship.trim()
             if (rel.isNotEmpty()) sb.append("关系：").append(rel).append('\n')

@@ -78,8 +78,9 @@ class JudgeClient(private val prefs: Prefs) {
         ctx: ChatContext?,
         questions: JSONObject
     ): JSONObject {
-        val effectiveRelationship = ctx?.effectiveRelationship(relationship) ?: relationship
-        val background = ctx?.background(effectiveRelationship) ?: ""
+        val personalized = prefs.personalize(ctx)
+        val effectiveRelationship = personalized.effectiveRelationship(relationship)
+        val background = personalized.background(effectiveRelationship)
         val history = ctx?.history ?: emptyList()
         val enriched = background.isNotBlank() || history.isNotEmpty()
         Log.i(TAG, "judge context: contactMatched=${ctx?.contact != null} " +
@@ -90,7 +91,9 @@ class JudgeClient(private val prefs: Prefs) {
         } catch (e: ApiException) {
             if (enriched && e.status != null && e.status in 400..499) {
                 Log.w(TAG, "judge HTTP ${e.status} with background/history; retrying plain")
-                send(JevQuestions.buildState(snapshot, effectiveRelationship), questions)
+                val fallbackRelationship = listOf(effectiveRelationship, personalized.personaBackground())
+                    .filter { it.isNotBlank() }.joinToString("\n")
+                send(JevQuestions.buildState(snapshot, fallbackRelationship), questions)
             } else throw e
         }
     }
