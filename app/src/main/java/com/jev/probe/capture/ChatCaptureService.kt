@@ -196,6 +196,14 @@ open class ChatCaptureService : AccessibilityService() {
                 else { pendingSnapshot = snapshot; runAnalysis() }
             }
         }
+        overlay?.onContinueChat = {
+            val snapshot = currentSnapshot
+            when {
+                analyzing -> overlay?.toast("正在分析，请稍候")
+                snapshot == null -> overlay?.toast("当前会话已变化，请重新分析")
+                else -> { pendingSnapshot = snapshot; runAnalysis(continueChat = true) }
+            }
+        }
         // Bubble menu: file the open conversation as a knowledge-base contact.
         // Contacts are never created automatically — this is the one-tap way in.
         overlay?.onSaveContact = {
@@ -362,7 +370,7 @@ open class ChatCaptureService : AccessibilityService() {
         return TRANSIENT_TITLE_WORDS.any { lower.contains(it.lowercase()) }
     }
 
-    private fun runAnalysis() {
+    private fun runAnalysis(continueChat: Boolean = false) {
         val snapshot = pendingSnapshot ?: return
         if (analyzing || destroyed || !prefs.enabled) return
         val previous = session.token() ?: return
@@ -397,8 +405,7 @@ open class ChatCaptureService : AccessibilityService() {
                     Log.i(TAG, "analysis judgment completed: ok=${judgment.error == null} elapsedMs=${android.os.SystemClock.elapsedRealtime() - started}")
                     main.post {
                         if (isCurrent(token)) {
-                            if (judgment.error != null) overlay?.showError(judgment.error)
-                            else overlay?.showJudgment(judgment)
+                            overlay?.showJudgment(judgment)
                             completed()
                         }
                     }
@@ -406,12 +413,12 @@ open class ChatCaptureService : AccessibilityService() {
                 submitAnalysis {
                     val started = android.os.SystemClock.elapsedRealtime()
                     var replyError: String? = null
-                    val result = try { client.draftAndRank(snapshot, rel, ctx) } catch (e: Exception) {
+                    val result = try { client.draftAndRank(snapshot, rel, ctx, continueChat) } catch (e: Exception) {
                         replyError = e.message ?: e.javaClass.simpleName
                         null
                     }
                     val ranked = result?.replies.orEmpty()
-                    Log.i(TAG, "analysis replies completed: ok=${replyError == null} action=${result?.advice} count=${ranked.size} elapsedMs=${android.os.SystemClock.elapsedRealtime() - started}")
+                    Log.i(TAG, "analysis replies completed: ok=${replyError == null} action=${result?.advice} continueChat=$continueChat count=${ranked.size} elapsedMs=${android.os.SystemClock.elapsedRealtime() - started}")
                     main.post {
                         if (isCurrent(token)) {
                             overlay?.showReplies(ranked, replyError, result?.advice) { text -> fillInput(token, text) }
@@ -766,6 +773,7 @@ open class ChatCaptureService : AccessibilityService() {
         // never call back into this dead instance.
         overlay?.onHideForVisit = null
         overlay?.onManualAnalyze = null
+        overlay?.onContinueChat = null
         overlay?.onSaveContact = null
         overlay?.onOcrCapture = null
         overlay?.hide()

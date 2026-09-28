@@ -49,6 +49,7 @@ class OverlayController(private val ctx: Context) {
     private var lp: WindowManager.LayoutParams? = null
 
     var onManualAnalyze: (() -> Unit)? = null
+    var onContinueChat: (() -> Unit)? = null
     var onHideForVisit: (() -> Unit)? = null
     private var idleShowing = false
 
@@ -415,6 +416,7 @@ class OverlayController(private val ctx: Context) {
         ensureRoot(); bubble?.alpha = 1f
         panel?.background = card(18, panelBg(), stroke = true) // re-apply in case opacity changed
         val views = ArrayList<View>()
+        a.error?.let { views.add(hint("情绪判断暂不可用：$it")) }
 
         // What context this read was based on (knowledge base / remembered history).
         views.add(hint(
@@ -448,6 +450,7 @@ class OverlayController(private val ctx: Context) {
         if (generating) {
             views.add(hint("生成中…"))
         } else {
+            if (a.replyAdvice == ReplyAdvice.FALLBACK) views.add(hint(ReplyAdvice.FALLBACK.message))
             val fill = lastFill ?: {}
             a.rankedReplies.forEachIndexed { i, r ->
                 views.add(replyCard(i + 1, r.text, if (a.rankedReplies.size > 1) (r.prob * 100).roundToInt() else null, fill))
@@ -456,6 +459,9 @@ class OverlayController(private val ctx: Context) {
                 val msg = replyError?.let { "回复接口出错：$it" }
                     ?: a.replyAdvice?.message ?: "（未生成候选回复）"
                 views.add(hint(msg))
+                if (replyError == null && a.replyAdvice in listOf(ReplyAdvice.WAIT, ReplyAdvice.FILTERED)) {
+                    views.add(pill(if (a.replyAdvice == ReplyAdvice.FILTERED) "重新生成候选" else "想继续聊，生成候选", true) { onContinueChat?.invoke() })
+                }
             }
         }
         views.add(reAnalyzeBtn())

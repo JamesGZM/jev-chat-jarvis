@@ -56,11 +56,11 @@ class JudgeClient(private val prefs: Prefs) {
         ctx: ChatContext? = null
     ): List<RankedReply> {
         if (candidates.isEmpty()) return emptyList()
-        if (candidates.size == 1) return listOf(RankedReply(candidates.single(), 1.0))
-        val questions = JSONObject().put("best_reply",
-            JevQuestions.rankQuestion(candidates).getJSONObject("best_reply"))
+        val questions = JevQuestions.replyReview(candidates)
         val answers = postDecisions(snapshot, relationship, ctx, questions)
-        return parseRanked(answers.optJSONObject("best_reply"), candidates)
+        val accepted = ReplyReview.accepted(answers, candidates)
+        Log.i(TAG, "reply review: candidates=${candidates.size} accepted=${accepted.size}")
+        return accepted
     }
 
     /**
@@ -119,15 +119,6 @@ class JudgeClient(private val prefs: Prefs) {
         val legend = o.optJSONObject("legend")
         val maxLevel = legend?.keys()?.asSequence()?.mapNotNull { it.toIntOrNull() }?.maxOrNull() ?: 9
         return Score(o.optDouble("score", 0.0), o.optDouble("confidence", 0.0), maxLevel)
-    }
-
-    private fun parseRanked(o: JSONObject?, candidates: List<String>): List<RankedReply> {
-        val keys = listOf("reply_a", "reply_b", "reply_c")
-        val probs = o?.optJSONObject("probabilities")
-        val list = candidates.mapIndexed { i, text ->
-            RankedReply(text, probs?.optDouble(keys.getOrElse(i) { "" }, 0.0) ?: 0.0)
-        }
-        return list.sortedByDescending { it.prob }
     }
 
     companion object { private const val TAG = "JEVASSIST" }

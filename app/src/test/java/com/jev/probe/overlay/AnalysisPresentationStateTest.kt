@@ -7,6 +7,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AnalysisPresentationStateTest {
+    @Test fun judgmentFailureDoesNotDiscardCompletedReplies() {
+        val state = AnalysisPresentationState()
+        state.receiveReplies(replies, null, ReplyAdvice.REPLY)
+        state.receiveJudgment(judgment.copy(error = "timeout"))
+        assertEquals(replies, state.analysis!!.rankedReplies)
+        assertEquals("timeout", state.analysis!!.error)
+        assertFalse(state.generating)
+    }
+
     @Test fun waitResultStopsLoadingInEitherCompletionOrder() {
         for (repliesFirst in listOf(true, false)) {
             val state = AnalysisPresentationState()

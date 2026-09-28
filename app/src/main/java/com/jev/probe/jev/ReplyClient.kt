@@ -21,12 +21,14 @@ class ReplyClient(private val prefs: Prefs) {
      *        history are prepended to the prompt with an instruction to stay
      *        consistent with them and invent nothing beyond them.
      */
-    fun draft(snapshot: ChatSnapshot, relationship: String, ctx: ChatContext? = null): ReplyDraft {
+    fun draft(snapshot: ChatSnapshot, relationship: String, ctx: ChatContext? = null, continueChat: Boolean = false, retry: Boolean = false): ReplyDraft {
         if (snapshot.messages.isEmpty() || snapshot.messages.any { it.side !in setOf("me", "other") })
             return ReplyDraft(ReplyAdvice.INSUFFICIENT_CONTEXT, emptyList())
         val effectiveRelationship = ctx?.effectiveRelationship(relationship) ?: relationship
-        val user = ReplyPrompt.user(snapshot, effectiveRelationship, knowledgeBlock(effectiveRelationship, ctx))
-        return ReplyDraftParser.parse(chat(ReplyPrompt.system, user, temperature = 0.8))
+        val user = ReplyPrompt.user(snapshot, effectiveRelationship, knowledgeBlock(effectiveRelationship, ctx), continueChat)
+        val system = ReplyPrompt.system(continueChat, snapshot.latestFrom == "other") +
+            if (retry) "上次未得到可用候选。重新生成简短、自然的接话，只承接已知内容，不新增行动安排或承诺。" else ""
+        return ReplyDraftParser.parse(chat(system, user, temperature = if (retry) 0.3 else 0.6))
     }
 
     /** The background + history preamble; empty string when there is no context. */

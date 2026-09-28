@@ -6,6 +6,44 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ReplyPromptTest {
+    @Test fun incomingMessageMakesCandidatesMandatoryEvenWithoutAQuestion() {
+        assertTrue(ReplyPrompt.system(false, incoming = true).contains("action 必须为 reply"))
+        assertTrue(ReplyPrompt.user(ChatSnapshot(null, listOf(Msg("other", "哦"))), "朋友", "")
+            .contains("必须提供至少一条"))
+        assertFalse(ReplyPrompt.system(false, incoming = false).contains("产品严格要求必须"))
+    }
+
+    @Test fun ownershipAnchorsKeepTheProblemWithItsSpeaker() {
+        val prompt = ReplyPrompt.user(ChatSnapshot(null, listOf(
+            Msg("me", "咖啡机坏了"), Msg("other", "哎呀")
+        )), "朋友", "")
+        assertTrue(prompt.contains("我最近说：咖啡机坏了"))
+        assertTrue(prompt.contains("对方最近说：哎呀"))
+        assertFalse(prompt.contains("对方最近说：咖啡机坏了"))
+    }
+
+    @Test fun explicitContinuationKeepsSpeakerIdentityWithoutDefaultWaitingInstruction() {
+        val snapshot = ChatSnapshot(null, listOf(Msg("me", "哈哈")))
+        val normal = ReplyPrompt.user(snapshot, "朋友", "")
+        val requested = ReplyPrompt.user(snapshot, "朋友", "", continueChat = true)
+        assertTrue(normal.contains("默认等待"))
+        assertFalse(requested.contains("默认等待"))
+        assertTrue(requested.contains("最后发言人：me（我）"))
+        assertTrue(requested.contains("只能延续我自己的发言"))
+        assertEquals(ReplyPrompt.system, ReplyPrompt.system(false))
+        assertTrue(ReplyPrompt.system(true).contains("本次用户主动点击了继续聊天"))
+        assertTrue(ReplyPrompt.system(true).contains("上下文不足时仍选 insufficient_context"))
+    }
+
+    @Test fun shortIncomingReactionIsNotAutomaticallyATopicEnding() {
+        val prompt = ReplyPrompt.user(ChatSnapshot(null, listOf(
+            Msg("me", "机器又卡住了"), Msg("other", "哦豁")
+        )), "朋友", "")
+        assertTrue(prompt.contains("最后发言人：other（对方）"))
+        assertFalse(prompt.contains("对方尚未回复"))
+        assertTrue(ReplyPrompt.system.contains("不要仅因为对方的话短就判定话题结束"))
+    }
+
     @Test fun missingCaptureContextIsPassedAlongWithTheDecisionRequest() {
         val prompt = ReplyPrompt.user(ChatSnapshot(null, listOf(Msg("other", "消息")),
             note = "无法区分左右"), "朋友", "")

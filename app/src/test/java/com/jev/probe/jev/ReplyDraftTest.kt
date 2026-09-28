@@ -20,9 +20,19 @@ class ReplyDraftTest {
         assertTrue(result.replies.isEmpty())
     }
 
-    @Test fun oneCandidateIsNotPaddedOrRanked() {
+    @Test fun oneCandidateIsReviewedWithoutPadding() {
         val draft = ReplyDraftParser.parse("""{"action":"reply","replies":[" 明天下午可以 "]}""")
-        assertEquals(listOf("明天下午可以"), draft.rankWith { error("must not rank") }.replies.map { it.text })
+        var calls = 0
+        val result = draft.rankWith { calls++; it.map { text -> RankedReply(text, 0.0) } }
+        assertEquals(1, calls)
+        assertEquals(listOf("明天下午可以"), result.replies.map { it.text })
+    }
+
+    @Test fun rejectedCandidatesAreNotMisrepresentedAsWaiting() {
+        val draft = ReplyDraft(ReplyAdvice.REPLY, listOf("不可靠的候选"))
+        val result = draft.rankWith { emptyList() }
+        assertEquals(ReplyAdvice.FILTERED, result.advice)
+        assertTrue(result.replies.isEmpty())
     }
 
     @Test fun twoAndThreeCandidatesAreRankedWithoutPadding() {

@@ -10,10 +10,10 @@ data class ReplyDraft(val advice: ReplyAdvice, val candidates: List<String>)
 internal fun ReplyDraft.rankWith(rank: (List<String>) -> List<RankedReply>): ReplySuggestion {
     val replies = when {
         advice != ReplyAdvice.REPLY -> emptyList()
-        candidates.size == 1 -> listOf(RankedReply(candidates.single(), 1.0))
         else -> rank(candidates)
     }
-    return ReplySuggestion(advice, replies)
+    val resultAdvice = if (advice == ReplyAdvice.REPLY && replies.isEmpty()) ReplyAdvice.FILTERED else advice
+    return ReplySuggestion(resultAdvice, replies)
 }
 
 internal object ReplyDraftParser {

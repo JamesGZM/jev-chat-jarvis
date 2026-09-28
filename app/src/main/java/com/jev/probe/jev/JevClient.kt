@@ -24,11 +24,12 @@ class JevClient(prefs: Prefs) {
     fun draftAndRank(
         snapshot: ChatSnapshot,
         relationship: String,
-        ctx: ChatContext? = null
+        ctx: ChatContext? = null,
+        continueChat: Boolean = false
     ): ReplySuggestion {
-        return replyClient.draft(snapshot, relationship, ctx).rankWith { candidates ->
-            judgeClient.rank(snapshot, relationship, candidates, ctx)
-        }
+        return replySuggestion(snapshot,
+            draft = { retry -> replyClient.draft(snapshot, relationship, ctx, continueChat, retry) },
+            review = { candidates -> judgeClient.rank(snapshot, relationship, candidates, ctx) })
     }
 
     /** Judge + replies, sequential. Used by the settings connectivity test. */
