@@ -6,29 +6,45 @@ import org.junit.Test
 
 class ReplyPipelineTest {
     private val incoming = ChatSnapshot(null, listOf(Msg("me", "机器卡住了"), Msg("other", "哎呀")))
+    private val candidates = listOf("又卡住了", "真会给我找事", "这机器又闹脾气了")
 
-    @Test fun incomingWaitIsRegeneratedInsteadOfDisplayedEmpty() {
-        val attempts = mutableListOf<Boolean>()
-        val result = replySuggestion(incoming, { retry ->
-            attempts.add(retry)
-            if (retry) ReplyDraft(ReplyAdvice.REPLY, listOf("真会给我找事")) else ReplyDraft(ReplyAdvice.WAIT, emptyList())
-        }, { it.map { text -> RankedReply(text, 0.0) } })
-        assertEquals(listOf(false, true), attempts)
-        assertEquals("真会给我找事", result.replies.single().text)
+    @Test fun threeCandidatesUseExactlyOneGenerationAndOneRanking() {
+        var drafts = 0
+        var ranks = 0
+        val result = replySuggestion(incoming,
+            { drafts++; ReplyDraft(ReplyAdvice.REPLY, candidates) },
+            { ranks++; it.reversed().map { text -> RankedReply(text, 0.1) } })
+        assertEquals(1, drafts)
+        assertEquals(1, ranks)
+        assertEquals(candidates.reversed(), result.replies.map { it.text })
     }
 
-    @Test fun rejectedCandidatesStillLeaveAnIncomingReplyOption() {
+    @Test fun rankingFailureKeepsAllDraftsWithoutRegenerationOrFakeScores() {
+        var drafts = 0
+        var ranks = 0
+        val result = replySuggestion(incoming,
+            { drafts++; ReplyDraft(ReplyAdvice.REPLY, candidates) },
+            { ranks++; throw IllegalStateException("offline") })
+        assertEquals(1, drafts)
+        assertEquals(1, ranks)
+        assertEquals(ReplyAdvice.REPLY, result.advice)
+        assertEquals(candidates, result.replies.map { it.text })
+        assertTrue(result.replies.all { it.prob.isNaN() })
+    }
+
+    @Test fun providerFailureDoesNotRetryAndStillOffersIncomingAcknowledgment() {
         var calls = 0
-        val result = replySuggestion(incoming, { calls++; ReplyDraft(ReplyAdvice.REPLY, listOf("不合格")) }, { emptyList() })
-        assertEquals(2, calls)
+        val result = replySuggestion(incoming, { calls++; throw IllegalStateException("failed") }, { error("not called") })
+        assertEquals(1, calls)
         assertEquals(ReplyAdvice.FALLBACK, result.advice)
         assertEquals("我看到了。", result.replies.single().text)
     }
 
-    @Test fun providerFailureCannotLeaveIncomingCandidatesEmpty() {
-        val result = replySuggestion(incoming, { throw IllegalStateException("failed") }, { error("not called") })
+    @Test fun incomingWaitDoesNotTriggerAnotherGeneration() {
+        var calls = 0
+        val result = replySuggestion(incoming, { calls++; ReplyDraft(ReplyAdvice.WAIT, emptyList()) }, { error("not called") })
+        assertEquals(1, calls)
         assertEquals(ReplyAdvice.FALLBACK, result.advice)
-        assertEquals(1, result.replies.size)
     }
 
     @Test fun outgoingTailStillAllowsWaiting() {
@@ -38,16 +54,11 @@ class ReplyPipelineTest {
         assertTrue(result.replies.isEmpty())
     }
 
-    @Test fun successfulFirstAttemptIsNotRepeated() {
-        var calls = 0
-        val result = replySuggestion(incoming,
-            { calls++; ReplyDraft(ReplyAdvice.REPLY, listOf("唉")) },
-            { it.map { text -> RankedReply(text, 0.0) } })
-        assertEquals(1, calls)
-        assertEquals(1, result.replies.size)
+    @Test(expected = InterruptedException::class) fun generationCancellationPropagates() {
+        replySuggestion(incoming, { throw InterruptedException() }, { emptyList() })
     }
 
-    @Test(expected = InterruptedException::class) fun cancellationDoesNotGenerateAFallbackForAnOldSession() {
-        replySuggestion(incoming, { throw InterruptedException() }, { emptyList() })
+    @Test(expected = InterruptedException::class) fun rankingCancellationPropagates() {
+        replySuggestion(incoming, { ReplyDraft(ReplyAdvice.REPLY, candidates) }, { throw InterruptedException() })
     }
 }

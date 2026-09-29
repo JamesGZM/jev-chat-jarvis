@@ -28,8 +28,8 @@ class JevClient(prefs: Prefs) {
         continueChat: Boolean = false
     ): ReplySuggestion {
         return replySuggestion(snapshot,
-            draft = { retry -> replyClient.draft(snapshot, relationship, ctx, continueChat, retry) },
-            review = { candidates -> judgeClient.rank(snapshot, relationship, candidates, ctx) })
+            draft = { replyClient.draft(snapshot, relationship, ctx, continueChat) },
+            rank = { candidates -> judgeClient.rank(snapshot, relationship, candidates, ctx) })
     }
 
     /** Judge + replies, sequential. Used by the settings connectivity test. */

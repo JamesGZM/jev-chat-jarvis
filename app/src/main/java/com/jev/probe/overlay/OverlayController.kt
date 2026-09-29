@@ -457,7 +457,7 @@ class OverlayController(private val ctx: Context) {
             if (a.replyAdvice == ReplyAdvice.FALLBACK) views.add(hint(ReplyAdvice.FALLBACK.message))
             val fill = lastFill ?: {}
             a.rankedReplies.forEachIndexed { i, r ->
-                views.add(replyCard(i + 1, r.text, if (a.rankedReplies.size > 1) (r.prob * 100).roundToInt() else null, fill))
+                views.add(replyCard(i + 1, r.text, if (a.rankedReplies.size > 1 && r.prob.isFinite()) (r.prob * 100).roundToInt() else null, fill))
             }
             if (a.rankedReplies.isEmpty()) {
                 val msg = replyError?.let { "回复接口出错：$it" }

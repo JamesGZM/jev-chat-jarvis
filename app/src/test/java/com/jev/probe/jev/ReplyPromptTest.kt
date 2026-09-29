@@ -6,10 +6,32 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ReplyPromptTest {
+    @Test fun manualAnalysisRequiresCandidatesForEitherLastSpeaker() {
+        for (side in listOf("me", "other")) {
+            val snapshot = ChatSnapshot(null, listOf(Msg("other", "进度如何？"), Msg(side, "还在测试")))
+            val system = ReplyPrompt.system(continueChat = true, incoming = side == "other")
+            val user = ReplyPrompt.user(snapshot, "同事", "", continueChat = true)
+            assertTrue(system.contains("一次提供恰好 3 条"))
+            assertTrue(system.contains("禁止返回 wait 或空数组"))
+            assertFalse(system.contains("默认 wait"))
+            assertFalse(user.contains("默认等待"))
+            assertFalse(user.contains("先选择行动"))
+            assertTrue(user.contains("根据整个窗口直接提供 3 条"))
+            assertTrue(user.contains("最后发言人：${side}"))
+        }
+    }
+
+    @Test fun generationRequiresThreeDistinctIndependentReplies() {
+        assertTrue(ReplyPrompt.system.contains("恰好 3 条"))
+        assertTrue(ReplyPrompt.system.contains("互不重复"))
+        assertTrue(ReplyPrompt.system.contains("不是分三次发送"))
+        assertFalse(ReplyPrompt.system.contains("1 至 3"))
+    }
+
     @Test fun incomingMessageMakesCandidatesMandatoryEvenWithoutAQuestion() {
         assertTrue(ReplyPrompt.system(false, incoming = true).contains("action 必须为 reply"))
         assertTrue(ReplyPrompt.user(ChatSnapshot(null, listOf(Msg("other", "哦"))), "朋友", "")
-            .contains("必须提供至少一条"))
+            .contains("必须提供 3 条"))
         assertFalse(ReplyPrompt.system(false, incoming = false).contains("产品严格要求必须"))
     }
 
@@ -30,9 +52,11 @@ class ReplyPromptTest {
         assertFalse(requested.contains("默认等待"))
         assertTrue(requested.contains("最后发言人：me（我）"))
         assertTrue(requested.contains("只能延续我自己的发言"))
-        assertEquals(ReplyPrompt.system, ReplyPrompt.system(false))
-        assertTrue(ReplyPrompt.system(true).contains("本次用户主动点击了继续聊天"))
-        assertTrue(ReplyPrompt.system(true).contains("上下文不足时仍选 insufficient_context"))
+        assertTrue(ReplyPrompt.system(false).contains("默认 wait"))
+        assertTrue(ReplyPrompt.system(true).contains("本次用户主动要求分析当前对话或继续聊天"))
+        assertFalse(ReplyPrompt.system(true).contains("默认 wait"))
+        assertTrue(ReplyPrompt.system(true).contains("action 必须为 reply"))
+        assertTrue(requested.contains("必须提供 3 条"))
     }
 
     @Test fun shortIncomingReactionIsNotAutomaticallyATopicEnding() {
@@ -49,7 +73,7 @@ class ReplyPromptTest {
             note = "无法区分左右"), "朋友", "")
         assertTrue(prompt.contains("采集限制：无法区分左右"))
         assertTrue(prompt.contains("先选择行动"))
-        assertTrue(ReplyPrompt.system.contains("默认 wait"))
+        assertTrue(ReplyPrompt.system(false).contains("默认 wait"))
         assertTrue(ReplyPrompt.system.contains("后两者 replies 必须为空数组"))
     }
 

@@ -31,7 +31,7 @@ interface ChatAppAdapter {
 
 /** Adapted chat apps, keyed by foreground package name. */
 internal fun createChatAppAdapters(): Map<String, ChatAppAdapter> =
-    listOf(WeChatAdapter(), QQAdapter(), XAdapter(), FeishuAdapter()).associateBy { it.pkg }
+    listOf(WeChatAdapter(), QQAdapter(), XAdapter(), FeishuAdapter(), DingTalkAdapter()).associateBy { it.pkg }
 
 /** Shared helpers. */
 private fun looksLikeTimestamp(t: String): Boolean =

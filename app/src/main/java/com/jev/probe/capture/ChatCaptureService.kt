@@ -427,12 +427,12 @@ open class ChatCaptureService : AccessibilityService() {
                 submitAnalysis {
                     val started = android.os.SystemClock.elapsedRealtime()
                     var replyError: String? = null
-                    val result = try { client.draftAndRank(snapshot, rel, ctx, continueChat) } catch (e: Exception) {
+                    val result = try { client.draftAndRank(snapshot, rel, ctx, continueChat = manual || continueChat) } catch (e: Exception) {
                         replyError = e.message ?: e.javaClass.simpleName
                         null
                     }
                     val ranked = result?.replies.orEmpty()
-                    Log.i(TAG, "analysis replies completed: ok=${replyError == null} action=${result?.advice} continueChat=$continueChat count=${ranked.size} elapsedMs=${android.os.SystemClock.elapsedRealtime() - started}")
+                    Log.i(TAG, "analysis replies completed: ok=${replyError == null} action=${result?.advice} manual=$manual continueChat=${manual || continueChat} count=${ranked.size} elapsedMs=${android.os.SystemClock.elapsedRealtime() - started}")
                     main.post {
                         if (isCurrent(token)) {
                             overlay?.showReplies(ranked, replyError, result?.advice) { text -> fillInput(token, text) }

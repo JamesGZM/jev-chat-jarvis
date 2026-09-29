@@ -56,11 +56,11 @@ class JudgeClient(private val prefs: Prefs) {
         ctx: ChatContext? = null
     ): List<RankedReply> {
         if (candidates.isEmpty()) return emptyList()
-        val questions = JevQuestions.replyReview(candidates)
-        val answers = postDecisions(snapshot, relationship, ctx, questions)
-        val accepted = ReplyReview.accepted(answers, candidates)
-        Log.i(TAG, "reply review: candidates=${candidates.size} accepted=${accepted.size}")
-        return accepted
+        if (candidates.size == 1) return listOf(RankedReply(candidates.single(), Double.NaN))
+        val answers = postDecisions(snapshot, relationship, ctx, JevQuestions.rankQuestion(candidates))
+        val ranked = ReplyRanking.parse(answers, candidates)
+        Log.i(TAG, "reply ranking: candidates=${candidates.size} returned=${ranked.size}")
+        return ranked
     }
 
     /**
