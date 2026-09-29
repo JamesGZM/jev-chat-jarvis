@@ -132,7 +132,7 @@ class OverlayController(private val ctx: Context) {
             layoutParams = FrameLayout.LayoutParams(dp(52), dp(52))
         }
         val b = TextView(ctx).apply {
-            text = "Jev"
+            text = "随记"
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
             textSize = 13f
@@ -170,7 +170,7 @@ class OverlayController(private val ctx: Context) {
         // Header
         val header = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         header.addView(TextView(ctx).apply {
-            text = "Jev 分析"; setTextColor(Color.parseColor("#111827")); textSize = 15f
+            text = "对话分析"; setTextColor(Color.parseColor("#111827")); textSize = 15f
             setTypeface(typeface, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         })
@@ -252,7 +252,7 @@ class OverlayController(private val ctx: Context) {
         menu.addView(menuItem("隐藏助手（可恢复）") {
             onHideForVisit?.invoke() ?: hide()
             android.util.Log.i("JEVASSIST", "overlay hidden by user")
-            toast("当前应用内暂时隐藏，离开后再进入或到 Jev 首页恢复")
+            toast("当前应用内暂时隐藏，离开后再进入或到随记首页恢复")
         })
         menu.addView(menuItem("取消") { root?.removeView(menu) })
         root?.addView(menu)
@@ -364,8 +364,12 @@ class OverlayController(private val ctx: Context) {
     fun showError(msg: String) {
         ensureRoot(); bubble?.alpha = 1f
         setContent(listOf(
-            line("出错了", "#DC2626", 14f, true),
-            hint(msg)))
+            line("暂时无法分析", "#DC2626", 14f, true),
+            hint(msg),
+            bigButton("重试分析") { onManualAnalyze?.invoke() }))
+        // Ordinary idle refreshes must not erase the reason for a manual failure.
+        idleShowing = true
+        if (!expanded) toggle()
     }
 
     /**

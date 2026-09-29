@@ -19,7 +19,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.jev.probe"
+        applicationId = "com.luma.note.p7c4"
         minSdk = 30
         targetSdk = 35
         versionCode = 5

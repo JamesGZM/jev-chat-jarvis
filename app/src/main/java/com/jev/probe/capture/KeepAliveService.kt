@@ -25,13 +25,13 @@ class KeepAliveService : Service() {
         val channelId = "jev_keepalive"
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(channelId, "Jev 助手运行中", NotificationManager.IMPORTANCE_MIN)
+            val ch = NotificationChannel(channelId, "随记运行中", NotificationManager.IMPORTANCE_MIN)
             ch.setShowBadge(false)
             nm.createNotificationChannel(ch)
         }
         val notif: Notification = Notification.Builder(this, channelId)
-            .setContentTitle("Jev 助手运行中")
-            .setContentText("点此打开 Jev，可恢复悬浮窗")
+            .setContentTitle("随记运行中")
+            .setContentText("点此打开随记，可恢复悬浮窗")
             .setContentIntent(PendingIntent.getActivity(this, 0,
                 Intent(this, MainActivity::class.java),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))

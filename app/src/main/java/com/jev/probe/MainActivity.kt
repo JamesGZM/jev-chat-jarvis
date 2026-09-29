@@ -16,6 +16,10 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
+import com.jev.probe.capture.ChatCaptureService
+import com.jev.probe.capture.KeepAliveService
+import com.jev.probe.capture.OverlayRecovery
 import com.jev.probe.core.Prefs
 import kotlin.math.roundToInt
 
@@ -28,8 +32,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var prefs: Prefs
     private lateinit var container: LinearLayout
-    private val a11yComponent =
-        "com.jev.probe/com.google.android.accessibility.selecttospeak.SelectToSpeakService"
+    private val a11yComponent get() =
+        "$packageName/com.google.android.accessibility.selecttospeak.SelectToSpeakService"
 
     private val accent = Color.parseColor("#3A7AFE")
     private val green = Color.parseColor("#16A34A")
@@ -63,17 +67,20 @@ class MainActivity : AppCompatActivity() {
     private fun build() {
         container.removeAllViews()
 
-        container.addView(text("Jev 聊天助手", 24f, ink, bold = true))
+        container.addView(text("随记", 24f, ink, bold = true))
         container.addView(text("在聊天 App 旁读对方消息（已接入微信、QQ、X、飞书；微信兼容性待真机验证），给出判断和候选回复。发送始终由你手动点。",
             13f, sub).apply { setPadding(0, dp(6), 0, dp(16)) })
 
         val a11y = isA11yEnabled()
         val overlay = Settings.canDrawOverlays(this)
         val key = prefs.hasKey()   // judge route key: the one analysis cannot run without
-        val ready = a11y && overlay && key
+        val connected = ChatCaptureService.isConnected
+        val ready = a11y && connected && overlay && key
 
         // Readiness card
         container.addView(statusCard(ready, a11y, overlay, key))
+        if (a11y && !connected) container.addView(text(
+            "无障碍已授权，但服务未连接。点“恢复悬浮窗”重连服务。", 13f, red))
         container.addView(privacyHint())
 
         // Permission checklist
@@ -92,17 +99,7 @@ class MainActivity : AppCompatActivity() {
 
         // Actions
         container.addView(sectionLabel("其他"))
-        container.addView(actionRow("恢复悬浮窗", "隐藏后重新显示，并重置悬浮球位置") {
-            if (!isA11yEnabled() || !Settings.canDrawOverlays(this)) {
-                Toast.makeText(this, "请先开启无障碍和悬浮窗权限", Toast.LENGTH_SHORT).show()
-            } else {
-                prefs.enabled = true
-                prefs.bubbleX = dp(8)
-                prefs.bubbleY = dp(150)
-                prefs.requestOverlayRestore()
-                moveTaskToBack(true)
-            }
-        })
+        container.addView(actionRow("恢复悬浮窗", "检查服务连接，恢复显示并重置位置") { restoreOverlay() })
         container.addView(actionRow("设置", "密钥 · 模型 · 关系 · 透明度 · 会话白名单") {
             startActivity(Intent(this, SettingsActivity::class.java))
         })
@@ -111,12 +108,41 @@ class MainActivity : AppCompatActivity() {
         val toggle = bigToggle(prefs.enabled)
         toggle.setOnClickListener {
             prefs.enabled = !prefs.enabled
+            if (prefs.enabled) restoreOverlay()
             build()
         }
         container.addView(toggle)
     }
 
     // ---------------------------------------------------------------- cards
+
+    private fun restoreOverlay() {
+        prefs.enabled = true
+        prefs.bubbleX = dp(8)
+        prefs.bubbleY = dp(150)
+        prefs.requestOverlayRestore()
+        when (OverlayRecovery.action(isA11yEnabled(), ChatCaptureService.isConnected, Settings.canDrawOverlays(this))) {
+            OverlayRecovery.ENABLE_ACCESSIBILITY -> {
+                Toast.makeText(this, "请开启 随记的无障碍服务，再返回聊天页面", Toast.LENGTH_LONG).show()
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+            OverlayRecovery.RECONNECT_ACCESSIBILITY -> {
+                runCatching { KeepAliveService.start(this) }
+                AlertDialog.Builder(this)
+                    .setTitle("无障碍服务已断开")
+                    .setMessage("权限开关虽已开启，服务实际没有连接，恢复按钮无法唤醒它。请在系统无障碍页面找到 随记的服务，关闭后再开启一次，然后返回聊天页面。")
+                    .setPositiveButton("去重连") { _, _ -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
+            OverlayRecovery.GRANT_OVERLAY -> startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            OverlayRecovery.RESTORE -> {
+                runCatching { KeepAliveService.start(this) }
+                Toast.makeText(this, "已请求恢复，请返回聊天 App 查看悬浮球", Toast.LENGTH_SHORT).show()
+                moveTaskToBack(true)
+            }
+        }
+    }
 
     private fun statusCard(ready: Boolean, a11y: Boolean, overlay: Boolean, key: Boolean): View {
         val c = cardBox()
@@ -127,6 +153,7 @@ class MainActivity : AppCompatActivity() {
         head.addView(text(if (ready) "已就绪，可以用了" else "尚未就绪", 16f, if (ready) green else ink, bold = true))
         c.addView(head)
         c.addView(checkLine("无障碍", a11y))
+        c.addView(checkLine("读取服务", ChatCaptureService.isConnected, okWord = "已连接", noWord = "未连接"))
         c.addView(checkLine("悬浮窗", overlay))
         c.addView(checkLine("密钥", key, okWord = "已设", noWord = "未设"))
         // History recording is opt-in (off by default). Mention it here, never block on it.

@@ -79,6 +79,8 @@ open class ChatCaptureService : AccessibilityService() {
         }
         if (key == "enabled" || key == "whitelist") {
             main.post {
+                if (destroyed) return@post
+                if (key == "enabled" && prefs.enabled) bubbleVisibility.restore()
                 leaveConversation()
                 maybeCapture()
             }
@@ -181,19 +183,18 @@ open class ChatCaptureService : AccessibilityService() {
             overlay?.hide()
         }
         overlay?.onManualAnalyze = {
-            if (!prefs.enabled) {
-                overlay?.toast("助手已暂停，请先在设置中开启")
-            } else {
-                val snapshot = currentSnapshot
-                Log.i(TAG, "manual analysis: cached=${snapshot != null} ocrBusy=$ocrBusy")
-                if (snapshot == null) {
+            when {
+                !prefs.enabled -> overlay?.showError("助手已暂停，请先在设置中开启")
+                analyzing -> overlay?.toast("正在分析，请稍候")
+                else -> {
+                    if (android.os.Build.VERSION.SDK_INT >= 33) clearCache()
+                    // Always re-read the live page before accepting a manual request.
                     maybeCapture()
-                    val fresh = currentSnapshot
-                    if (fresh != null) { pendingSnapshot = fresh; runAnalysis() }
-                    else if (titleOcrBusy) overlay?.toast("正在识别会话标题，请稍候再点分析")
+                    val snapshot = currentSnapshot
+                    Log.i(TAG, "manual analysis: cached=${snapshot != null} ocrBusy=$ocrBusy")
+                    if (snapshot != null) { pendingSnapshot = snapshot; runAnalysis(manual = true) }
                     else ocrCaptureManual()
                 }
-                else { pendingSnapshot = snapshot; runAnalysis() }
             }
         }
         overlay?.onContinueChat = {
@@ -201,7 +202,7 @@ open class ChatCaptureService : AccessibilityService() {
             when {
                 analyzing -> overlay?.toast("正在分析，请稍候")
                 snapshot == null -> overlay?.toast("当前会话已变化，请重新分析")
-                else -> { pendingSnapshot = snapshot; runAnalysis(continueChat = true) }
+                else -> { pendingSnapshot = snapshot; runAnalysis(continueChat = true, manual = true) }
             }
         }
         // Bubble menu: file the open conversation as a knowledge-base contact.
@@ -231,6 +232,7 @@ open class ChatCaptureService : AccessibilityService() {
         // bubble for whatever chat is already open, so it comes back on its own
         // instead of waiting for the user to scroll.
         main.postDelayed({ if (prefs.enabled) runCatching { maybeCapture() } }, 900)
+        isConnected = true
         Log.i(TAG, "capture service connected")
     }
 
@@ -243,6 +245,16 @@ open class ChatCaptureService : AccessibilityService() {
             event.packageName?.toString() == packageName) return
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
             event.packageName?.toString() == "com.tencent.mm") wechatTitleCache.invalidate()
+
+        if (UnknownConversationReset.shouldReset(
+                knownConversation = session.target != null,
+                chatAppEvent = adapters.containsKey(event.packageName?.toString()),
+                pageChanged = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                    type == AccessibilityEvent.TYPE_VIEW_SCROLLED)) {
+            // Two unreadable pages both have a null target, but must not share a panel.
+            cancelAnalysis()
+            Log.i(TAG, "unknown conversation: reset panel on page event type=$type")
+        }
 
         when (type) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
@@ -370,11 +382,13 @@ open class ChatCaptureService : AccessibilityService() {
         return TRANSIENT_TITLE_WORDS.any { lower.contains(it.lowercase()) }
     }
 
-    private fun runAnalysis(continueChat: Boolean = false) {
-        val snapshot = pendingSnapshot ?: return
-        if (analyzing || destroyed || !prefs.enabled) return
-        val previous = session.token() ?: return
-        if (!isCurrent(previous)) return
+    private fun runAnalysis(continueChat: Boolean = false, manual: Boolean = false) {
+        fun reject(message: String) { if (manual) overlay?.showError(message) }
+        val snapshot = pendingSnapshot ?: run { reject("没有可分析的消息，请重试"); return }
+        if (analyzing) { if (manual) overlay?.toast("正在分析，请稍候"); return }
+        if (destroyed || !prefs.enabled) { reject("助手已暂停或读取服务已断开，请回到助手首页恢复"); return }
+        val previous = session.token() ?: run { reject("当前会话已变化，请重试"); return }
+        if (!isCurrent(previous)) { reject("当前会话已变化或不可读取，请保持聊天详情页打开后重试"); return }
         if (!prefs.hasKey()) { overlay?.showError("未设置判断接口密钥，去设置里填"); return }
         val token = session.begin() ?: return
         analyzing = true
@@ -487,14 +501,25 @@ open class ChatCaptureService : AccessibilityService() {
      * the other person and the panel says so.
      */
     private fun ocrCaptureManual() {
-        if (titleOcrBusy) { overlay?.toast("正在识别会话标题，请稍候"); return }
-        if (ocrBusy) { overlay?.toast("正在识别当前对话，请稍候"); return }
+        if (titleOcrBusy) { overlay?.showError("正在识别会话标题，请稍候重试"); return }
+        if (ocrBusy) { overlay?.showError("正在识别当前对话，请稍候重试"); return }
         val root = rootInActiveWindow
         val pkg = root?.packageName?.toString() ?: foregroundPkg ?: activePkg ?: ""
         // Top bar text, if this app has one we can read; else the first OCR line.
         val target = root?.let { targetFor(it) } ?: run {
-            Log.i(TAG, "manual capture: no recognized conversation")
-            overlay?.toast("未识别到聊天内容，请进入聊天详情页，等待标题加载后重试")
+            val chat = root?.let { adapters[pkg]?.extract(it, resources) }
+            val emptyRoot = root != null && root.childCount == 0 && root.text.isNullOrBlank() && root.contentDescription.isNullOrBlank()
+            Log.i(TAG, "manual capture rejected: root=${root != null} empty=$emptyRoot chat=${chat != null}")
+            windows.forEach { window ->
+                val candidate = window.root
+                Log.i(TAG, "capture window: id=${window.id} type=${window.type} active=${window.isActive} " +
+                    "focused=${window.isFocused} pkg=${candidate?.packageName} children=${candidate?.childCount}")
+            }
+            overlay?.showError(ManualCaptureFailure.message(root != null, emptyRoot, chat != null))
+            return
+        }
+        if (!prefs.isAllowed(target.title)) {
+            overlay?.showError("当前联系人不在分析白名单中，请在设置中调整白名单")
             return
         }
         observeTarget(target)
@@ -672,7 +697,7 @@ open class ChatCaptureService : AccessibilityService() {
         if (manual || auto) {
             pendingSnapshot = snapshot
             main.removeCallbacks(debounce)
-            runAnalysis()
+            runAnalysis(manual = manual)
         } else {
             overlay?.setNote(snapshot.note)
             overlay?.showIdle(snapshot.title)
@@ -762,7 +787,16 @@ open class ChatCaptureService : AccessibilityService() {
         overlay?.hide()
     }
 
+    override fun onUnbind(intent: android.content.Intent?): Boolean {
+        isConnected = false
+        leaveConversation()
+        overlay?.hide()
+        Log.i(TAG, "capture service disconnected")
+        return super.onUnbind(intent)
+    }
+
     override fun onDestroy() {
+        isConnected = false
         destroyed = true
         getSharedPreferences(Prefs.PREFS_MAIN, MODE_PRIVATE)
             .unregisterOnSharedPreferenceChangeListener(preferencesListener)
@@ -782,6 +816,8 @@ open class ChatCaptureService : AccessibilityService() {
     }
 
     companion object {
+        @Volatile var isConnected: Boolean = false
+            private set
         private const val TAG = "JEVASSIST"
 
         /** Whole-screen OCR keeps the middle: no action bar, no input area. */
