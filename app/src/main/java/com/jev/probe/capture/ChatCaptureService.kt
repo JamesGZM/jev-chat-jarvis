@@ -189,7 +189,7 @@ open class ChatCaptureService : AccessibilityService() {
                 else -> {
                     if (android.os.Build.VERSION.SDK_INT >= 33) clearCache()
                     // Always re-read the live page before accepting a manual request.
-                    maybeCapture()
+                    maybeCapture(allowOcr = false)
                     val snapshot = currentSnapshot
                     Log.i(TAG, "manual analysis: cached=${snapshot != null} ocrBusy=$ocrBusy")
                     if (snapshot != null) { pendingSnapshot = snapshot; runAnalysis(manual = true) }
@@ -264,7 +264,7 @@ open class ChatCaptureService : AccessibilityService() {
         }
     }
 
-    private fun maybeCapture(retryMissingRoot: Boolean = true) {
+    private fun maybeCapture(retryMissingRoot: Boolean = true, allowOcr: Boolean = true) {
         if (destroyed) return
         val root = rootInActiveWindow
         val pkg = root?.packageName?.toString()
@@ -319,6 +319,7 @@ open class ChatCaptureService : AccessibilityService() {
         // WeChat hides them when the disguise fails) → screenshot + OCR, subject
         // to ScreenCapture's own >=1s throttle and failure backoff.
         if (snapshot.messages.isEmpty()) {
+            if (!allowOcr) { currentSnapshot = null; return }
             // In a chat window, but the tree carries no text (Feishu draws its
             // message bodies). Park the bubble BEFORE attempting OCR, so the user
             // still has something to tap when OCR is off, deduped, or comes back
@@ -523,7 +524,12 @@ open class ChatCaptureService : AccessibilityService() {
             return
         }
         observeTarget(target)
-        ocrCapture(target.title, emptyList(), pkg, manual = true)
+        val snapshot = root?.let { adapters[pkg]?.extract(it, resources) }
+        if (!snapshot?.messages.isNullOrEmpty()) {
+            finishOcrSnapshot(snapshot!!.copy(title = target.title), pkg, manual = true, token = session.token() ?: return)
+        } else {
+            ocrCapture(target.title, snapshot?.bubbleRects.orEmpty(), pkg, manual = true)
+        }
     }
 
     /**
@@ -552,6 +558,10 @@ open class ChatCaptureService : AccessibilityService() {
         if (ocrBusy || destroyed || !prefs.enabled) return
         val token = session.token() ?: return
         if (!isCurrent(token)) return
+        if (ocrScope(pkg, rects.isNotEmpty()) == OcrScope.UNAVAILABLE) {
+            if (manual) overlay?.showError("未找到可读取的飞书消息区域，请保持聊天正文可见后重试")
+            return
+        }
         ocrBusy = true
         screenCapture.capture(shouldCapture = { isCurrent(token) }) { res ->
             if (!isCurrent(token)) {
@@ -575,14 +585,15 @@ open class ChatCaptureService : AccessibilityService() {
                 is ScreenCapture.Result.Ok -> {
                     ocr.scaleX = res.scaleX; ocr.scaleY = res.scaleY
                     ocr.originX = res.originX; ocr.originY = res.originY
-                    if (rects.isNotEmpty() && !manual) {
-                        // Re-measure inside the callback. The rects handed in were
-                        // read before the 120ms overlay-hide wait and the shot
-                        // itself; one scroll tick in between and we would crop the
-                        // rows next to the ones in the picture. Fall back to the
-                        // old rects only if the tree gives us nothing now.
-                        val fresh = rootInActiveWindow?.let { collectFeishuBubbleRects(it, resources) }
-                        ocrByRects(res.bitmap, if (fresh.isNullOrEmpty()) rects else fresh, treeTitle, pkg, token)
+                    if (ocrScope(pkg, rects.isNotEmpty()) == OcrScope.BUBBLES) {
+                        val fresh = rootInActiveWindow?.let { collectFeishuBubbleRects(it, resources) }.orEmpty()
+                        // Moving bubbles invalidate the crop coordinates of this screenshot.
+                        if (fresh != rects) {
+                            res.bitmap.recycle()
+                            ocrBusy = false
+                            lastOcrSignature = ""
+                            if (manual) overlay?.showError("消息位置发生变化，请停稳页面后重试")
+                        } else ocrByRects(res.bitmap, fresh, treeTitle, pkg, manual, token)
                     } else ocrWholeScreen(res.bitmap, treeTitle, pkg, manual, token)
                 }
             }
@@ -590,7 +601,7 @@ open class ChatCaptureService : AccessibilityService() {
     }
 
     /** One OCR pass per bubble rectangle; each rect becomes exactly one message. */
-    private fun ocrByRects(bmp: Bitmap, rects: List<BubbleRect>, title: String?, pkg: String, token: ConversationSession.Token) {
+    private fun ocrByRects(bmp: Bitmap, rects: List<BubbleRect>, title: String?, pkg: String, manual: Boolean, token: ConversationSession.Token) {
         val sx = ocr.scaleX; val sy = ocr.scaleY
         // Screen -> bitmap: drop the window origin first. A window shot does not
         // start at (0,0) in split screen or when it excludes the status bar.
@@ -607,7 +618,7 @@ open class ChatCaptureService : AccessibilityService() {
                 remaining--
                 if (remaining == 0) {
                     runCatching { bmp.recycle() }
-                    finishOcrSnapshot(ChatSnapshot(title, out.filterNotNull()), pkg, manual = false, token = token)
+                    finishOcrSnapshot(ChatSnapshot(title, out.filterNotNull()), pkg, manual = manual, token = token)
                 }
             }
         }

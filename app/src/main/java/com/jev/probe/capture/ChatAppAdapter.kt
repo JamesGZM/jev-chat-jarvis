@@ -265,137 +265,59 @@ class QQAdapter : ChatAppAdapter {
     }
 }
 
-/** Only my own Feishu bubbles carry the sent/read strip. */
-private const val FEISHU_READ_STATE_ID = "time_read_state_container_align_bubble"
-
-/** Does this bubble carry the "sent / read" strip that only mine have? */
-private fun feishuHasReadState(bubble: AccessibilityNodeInfo): Boolean {
-    val stack = ArrayDeque<AccessibilityNodeInfo>()
-    stack.addLast(bubble)
-    var guard = 0
-    while (stack.isNotEmpty() && guard < 400) {
-        guard++
-        val node = stack.removeLast()
-        val id = node.viewIdResourceName ?: ""
-        if (id.endsWith(FEISHU_READ_STATE_ID)) return true
-        for (i in node.childCount - 1 downTo 0) node.getChild(i)?.let { stack.addLast(it) }
+/** Copy only visible nodes for message selection and crop bounds. */
+private fun feishuTree(root: AccessibilityNodeInfo): FeishuNode {
+    var count = 0
+    fun read(node: AccessibilityNodeInfo, depth: Int): FeishuNode {
+        count++
+        val bounds = Rect().also { node.getBoundsInScreen(it) }
+        val children = if (depth >= 80 || count >= 6000) emptyList() else
+            (0 until node.childCount).mapNotNull { node.getChild(it) }
+                .filter { it.isVisibleToUser }.map { read(it, depth + 1) }
+        return FeishuNode(node.viewIdResourceName.orEmpty(), node.text?.toString().orEmpty(),
+            node.contentDescription?.toString().orEmpty(), node.isLongClickable,
+            bounds.left, bounds.top, bounds.right, bounds.bottom, children)
     }
-    return false
+    return read(root, 0)
 }
 
-/**
- * Feishu bubble rectangles in SCREEN coordinates, top to bottom, with the side
- * the read-receipt strip implies.
- *
- * Split out of [FeishuAdapter.extract] so the capture service can call it again
- * from inside the screenshot callback: several hundred ms pass between reading
- * the tree and the picture arriving (debounce + overlay hide + the shot itself),
- * and a list that scrolled in between would make us crop the wrong rows.
- */
-internal fun collectFeishuBubbleRects(
-    root: AccessibilityNodeInfo,
-    res: Resources
-): List<BubbleRect> {
-    val height = res.displayMetrics.heightPixels
-    val topBand = (height * 0.14).toInt()      // action bar + tab row
-    val bottomBand = (height * 0.84).toInt()   // input box + keyboard
-    val rects = ArrayList<BubbleRect>()
-    val stack = ArrayDeque<AccessibilityNodeInfo>()
-    stack.addLast(root)
-    var guard = 0
-    while (stack.isNotEmpty() && guard < 6000) {
-        guard++
-        val node = stack.removeLast()
-        val id = node.viewIdResourceName ?: ""
-        if (id.endsWith(":id/bubble_content_container")) {
-            val b = Rect(); node.getBoundsInScreen(b)
-            if (b.width() > 0 && b.height() > 0 && b.bottom > topBand && b.top < bottomBand) {
-                rects.add(BubbleRect(Rect(b), if (feishuHasReadState(node)) "me" else "other"))
-            }
-        }
-        for (i in node.childCount - 1 downTo 0) node.getChild(i)?.let { stack.addLast(it) }
+private fun feishuRects(tree: FeishuNode, res: Resources): List<BubbleRect> {
+    val nodes = tree.all().toList()
+    val list = nodes.firstOrNull { it.named("chat_message_list_view") || it.named("message_list") }
+        ?: return emptyList()
+    val headerBottom = nodes.firstOrNull { it.named("chat_titlebar_container") || it.named("title_container") }?.bottom ?: 0
+    val inputTop = nodes.firstOrNull { it.named("chat_keyboard_container") || it.named("input") }?.top
+        ?: res.displayMetrics.heightPixels
+    val viewport = Rect(list.left, maxOf(list.top, headerBottom), list.right, minOf(list.bottom, inputTop))
+    if (viewport.isEmpty) return emptyList()
+    return feishuMessages(tree).mapNotNull { message ->
+        val n = message.node
+        val bounds = Rect(n.left, n.top, n.right, n.bottom)
+        if (bounds.intersect(viewport) && !bounds.isEmpty) BubbleRect(bounds, message.side) else null
     }
-    rects.sortBy { it.rect.top }
-    return rects
 }
 
-/**
- * Feishu / Lark (com.ss.android.lark). Nodes are not obfuscated, but the message
- * text is DRAWN, not laid out as views (verified 2026-09-21): the tree gives us
- * bubble rectangles and chrome, and almost never a body. So this adapter is a
- * hybrid — it reports what it can read as messages (usually nothing) and always
- * reports the bubble geometry in [ChatSnapshot.bubbleRects] for the service to
- * OCR rect by rect.
- *
- * "In a chat window" = the tree has `id/message`, `id/bubble_content_container`
- * or the `id/kb_rich_text_content` input box.
- *
- * Side: Feishu left-aligns everyone, so geometry says nothing. What does say
- * something is the read-receipt strip (`…time_read_state_container_align_bubble`)
- * that only hangs off MY bubbles — present → "me", absent → "other". Unverified
- * on a real device (see the B-stage report's gaps).
- */
+internal fun collectFeishuBubbleRects(root: AccessibilityNodeInfo, res: Resources): List<BubbleRect> =
+    feishuRects(feishuTree(root), res)
+
+/** Read verified message bodies; use bounded bubble OCR when text is not exposed. */
 class FeishuAdapter : ChatAppAdapter {
     override val pkg = "com.ss.android.lark"
 
     override fun extract(root: AccessibilityNodeInfo, res: Resources): ChatSnapshot? {
-        val width = res.displayMetrics.widthPixels
-        val height = res.displayMetrics.heightPixels
-        val topBand = (height * 0.14).toInt()      // action bar + tab row
-        val bottomBand = (height * 0.84).toInt()   // input box + keyboard
-
-        val structure = FeishuChatStructure()
-        var title: String? = null
-        var shellTitle: String? = null
-        val items = ArrayList<Triple<Int, Int, String>>() // top, centerX, text
-        // Same collection the service re-runs inside the screenshot callback.
-        val rects = collectFeishuBubbleRects(root, res)
-
-        val stack = ArrayDeque<AccessibilityNodeInfo>()
-        stack.addLast(root)
-        var guard = 0
-        while (stack.isNotEmpty() && guard < 6000) {
-            guard++
-            val node = stack.removeLast()
-            val id = node.viewIdResourceName ?: ""
-            structure.observe(id)
-            if (id.endsWith(":id/group_name")) node.text?.toString()?.let { if (title == null) title = it }
-            if (id == "$pkg:id/title") node.text?.toString()?.let { if (shellTitle == null) shellTitle = it }
-
-            val text = node.text?.toString()
-            val cls = node.className?.toString()
-            if (!text.isNullOrBlank() && cls == "android.widget.TextView" && !isChrome(id) && !looksLikeTimestamp(text)) {
-                val b = Rect(); node.getBoundsInScreen(b)
-                if (b.top in (topBand + 1) until bottomBand) {
-                    items.add(Triple(b.top, b.centerX(), text.trim()))
-                }
-            }
-            for (i in node.childCount - 1 downTo 0) node.getChild(i)?.let { stack.addLast(it) }
-        }
+        val tree = feishuTree(root)
+        val nodes = tree.all().toList()
+        val structure = FeishuChatStructure().apply { nodes.forEach { observe(it.id) } }
         if (!structure.isChat) return null
-        // The newer shell's TextViews include action labels and input hints;
-        // without verified message nodes, use OCR rather than treating them as chat.
-        if (structure.usesNewShell) return ChatSnapshot(title ?: shellTitle, emptyList(), rects)
-
-        if (items.isEmpty()) return ChatSnapshot(title, emptyList(), rects)
-
-        items.sortBy { it.first }
-        val msgs = items.map { (_, cx, text) ->
-            Msg(if (cx > width / 2) "me" else "other", text)
-        }
-        return ChatSnapshot(title, msgs, rects)
+        val title = nodes.firstOrNull { it.named("group_name") }?.text?.takeIf { it.isNotBlank() }
+            ?: nodes.firstOrNull { it.named("title") }?.text?.takeIf { it.isNotBlank() }
+        val rows = feishuMessages(tree)
+        val rects = feishuRects(tree, res)
+        // If any legacy body is unreadable, OCR the whole set of bounded bubbles
+        // to preserve ordering instead of silently dropping those messages.
+        val messages = if (rows.any { it.text == null }) emptyList() else rows.map { Msg(it.side, it.text!!) }
+        return ChatSnapshot(title, messages, rects)
     }
-
-    /** Non-message UI text to skip: title, sender name, time, system notices,
-     *  the input EditText. Bodies have no id (bare TextView) so they pass. */
-    private fun isChrome(id: String): Boolean =
-        id.endsWith(":id/group_name") ||
-            id.endsWith(":id/name_tv") ||
-            id.endsWith(":id/date_tv") ||
-            id.endsWith(":id/system_label") ||
-            id.endsWith(":id/kb_rich_text_content") ||
-            id.endsWith(":id/thread_title_tv") ||
-            id.endsWith(":id/thread_subtitle_tv")
 }
 
 /** Trailing "8:11 上午" / "10:29 下午" / "8:11 AM" stamp X glues onto a message. */
