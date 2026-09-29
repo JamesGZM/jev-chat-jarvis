@@ -4,6 +4,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class QQTitleTest {
+    @Test fun currentPrivateChatTitleIsReadAndTrimmed() {
+        assertEquals("Alice", qqConversationTitle("com.tencent.mobileqq:id/3kc", " Alice ", true))
+    }
+
+    @Test fun currentPrivateChatTitleMustBeVisibleAndNonempty() {
+        assertNull(qqConversationTitle("com.tencent.mobileqq:id/3kc", "Alice", false))
+        assertNull(qqConversationTitle("com.tencent.mobileqq:id/3kc", " ", true))
+        assertNull(qqConversationTitle("com.tencent.mobileqq:id/3kc", null, true))
+    }
+
     @Test fun privateChatTitleIsReadWithoutRequiringCenteredPosition() {
         assertEquals("Alice", qqConversationTitle("com.tencent.mobileqq:id/3g3", "Alice", true))
     }

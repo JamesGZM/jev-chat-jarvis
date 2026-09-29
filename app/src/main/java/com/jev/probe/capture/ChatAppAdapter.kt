@@ -204,7 +204,13 @@ class WeChatAdapter : ChatAppAdapter {
  * edge of the bubble hugs its avatar column instead of using the center point.
  */
 internal fun qqConversationTitle(id: String?, text: CharSequence?, visible: Boolean): String? {
-    if (!visible || (id != "com.tencent.mobileqq:id/371" && id != "com.tencent.mobileqq:id/3g3")) return null
+    if (!visible) return null
+    when (id) {
+        "com.tencent.mobileqq:id/371",
+        "com.tencent.mobileqq:id/3g3",
+        "com.tencent.mobileqq:id/3kc" -> Unit
+        else -> return null
+    }
     return text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
 }
 
